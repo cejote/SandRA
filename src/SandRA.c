@@ -52,6 +52,11 @@ typedef struct str_thdata
 
 void print_help()
 {
+	/*
+	 * say hello, say what to provide...
+	 *
+	 *TODO: adopt to our needs ;)
+	 */
     printf("SandRA Version ###\n\n");
     printf("Usage: SandRA <options>\n");
     printf("options:\n");
@@ -83,8 +88,19 @@ int file_exists(const char * filename)
     return 0;
 }
 
+
+
+
 char ** get_random_entries(FILE *fp, unsigned int N)
 {
+	/*
+	 *
+	 * open file and get N-many random entries
+	 *
+	 * not working version
+	 *
+	 */
+
   long int file_length;
   fseek(fp, 0, SEEK_END);
 
@@ -153,6 +169,14 @@ char ** get_random_entries(FILE *fp, unsigned int N)
 
 char ** get_random_entry(FILE *fp, unsigned int entrynum) //, char** seqlist)
 {
+	/*
+	 *
+	 * open file and get N-many random entries
+	 *
+	 * working version
+	 *
+	 */
+
     long int file_length;
 
     fseek(fp, 0, SEEK_END);
@@ -217,19 +241,14 @@ char ** get_random_entry(FILE *fp, unsigned int entrynum) //, char** seqlist)
                             printf("%i\t", a);
                             printf("%s", seqlist[a]);
                         }
-
 */
 
                         break;
 
-
                     }
-
                 }
-
             }
         }
-
     }
 
     return seqlist;
@@ -265,6 +284,7 @@ char** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
  *
  * breaks need to be replace by proper error handling
  *
+ *TODO: hmm, glaube der hat die daten nur intern, liefert sie aber nicht ordentlich zurück wegen **liste...
  */
 {
 
@@ -318,15 +338,17 @@ char** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
         data1.processed=0;
 		data1.thread_no = N;
 
+
+		//TODO: wie kann ich das beheben?
 		//struclist[i]=data1;
 
-		printf("%s%s\n", data1.readID1, data1.readID2);
-		printf("%s%s\n", data1.read1, data1.read2);
-		printf("%s%s\n", data1.phred1, data1.phred2);
+		printf(":1 %s%s\n", data1.readID1, data1.readID2);
+		printf(":2 %s%s\n", data1.read1, data1.read2);
+		printf(":3 %s%s\n", data1.phred1, data1.phred2);
 
 	}
 
-	return 0;
+	return struclist;
 }
 
 
@@ -335,8 +357,111 @@ char** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
 
 
 
+/*****************
+ * begin phred stuff
+ */
 
 
+/* adapted from sickle */
+#define Q_OFFSET 0
+#define Q_MIN 1
+#define Q_MAX 2
+
+static const char typenames[4][10] = {
+	{"Phred"},
+	{"Sanger"},
+	{"Solexa"},
+	{"Illumina"}
+};
+
+static const int quality_constants[4][3] = {
+  /* offset, min, max */
+  {0, 4, 60}, /* PHRED */
+  {33, 33, 126}, /* SANGER */
+  {64, 58, 112}, /* SOLEXA; this is an approx; the transform is non-linear */
+  {64, 64, 110} /* ILLUMINA */
+};
+
+int get_quality_num (char qualchar, int qualtype, void *fqrec, int pos) {
+  /*
+   * sickle says:
+     Return the adjusted quality, depending on quality type.
+
+     Note that this uses the array in sickle.h, which *approximates*
+     the SOLEXA (pre-1.3 pipeline) qualities as linear. This is
+     inaccurate with low-quality bases.
+
+
+	int get_quality_num (char qualchar, int qualtype, kseq_t *fqrec, int pos) {
+
+  */
+
+  int qual_value = (int) qualchar;
+
+  if (qual_value < quality_constants[qualtype][Q_MIN] || qual_value > quality_constants[qualtype][Q_MAX]) {
+	fprintf (stderr, "ERROR: Quality value (%d) does not fall within correct range for %s encoding.\n", qual_value, typenames[qualtype]);
+	fprintf (stderr, "Range for %s encoding: %d-%d\n", typenames[qualtype], quality_constants[qualtype][Q_MIN], quality_constants[qualtype][Q_MAX]);
+	//fprintf (stderr, "FastQ record: %s\n", fqrec->name.s);
+	//fprintf (stderr, "Quality string: %s\n", fqrec->qual.s);
+	fprintf (stderr, "Quality char: '%c'\n", qualchar);
+	fprintf (stderr, "Quality position: %d\n", pos+1);
+	exit(1);
+  }
+
+  return (qual_value - quality_constants[qualtype][Q_OFFSET]);
+}
+
+
+
+
+
+
+int *detect_phred_type(void *ptr)
+{
+	/*
+	 * idea it to use char distribution of samples to judge on sequencing type
+	 *
+	 *TODO to be implemented.
+	 *
+	 *
+	# set regular expressions
+	my $sanger_regexp = qr/[!"#$%&'()*+,-.\/0123456789:]/;
+	my $solexa_regexp = qr/[\;<=>\?]/;
+	my $solill_regexp = qr/[JKLMNOPQRSTUVWXYZ\[\]\^\_\`abcdefgh]/;
+	my $all_regexp = qr/[\@ABCDEFGHI]/;
+	*/
+	return 0;
+}
+
+
+
+void trim_read(void *ptr)
+{
+	/*
+	 * do quality-based read trimming
+	 *
+	 *
+	 *TODO to be implemented.
+	 *
+	 */
+
+
+	return;
+}
+
+
+/*****************
+ * end phred stuff
+ */
+
+
+
+
+
+
+/*
+ * begin thread based stuff
+ */
 
 void *do_loop(void *ptr)
 {
@@ -364,6 +489,9 @@ void *do_loop(void *ptr)
     pthread_exit(NULL);
 }
 
+/*
+ * end thread based stuff
+ */
 
 
 
@@ -382,8 +510,13 @@ int main(int argc, const char** argv) {
 
 
 
-    puts("#####################\n#####################\n#####################\n#####################\n");
-/*
+
+
+    /*
+     * geht nicht :(
+     *
+     *
+     *
     //TODO warum geht das nicht mit [number_of_threads]
 	//int curr_threads[10];
 	pthread_t thread_id[10];
@@ -422,6 +555,8 @@ int main(int argc, const char** argv) {
 */
 
 
+
+    /* ging :)
 	int k;
         for (k=0; k<number_of_threads;k++)
         {
@@ -447,9 +582,9 @@ int main(int argc, const char** argv) {
 
 
             //pthread_create (&curr_thread, NULL, (void *) &print_message_function, (void *) &curr_data);
-            /* Main block now waits for both threads to terminate, before it exits
-               If main block exits, both threads exit, even if the threads have not
-               finished their work */
+            // Main block now waits for both threads to terminate, before it exits
+            //   If main block exits, both threads exit, even if the threads have not
+            //   finished their work
             //pthread_join(thr_id, NULL);
         }
         sleep(1);
@@ -465,6 +600,9 @@ int main(int argc, const char** argv) {
 
 
         return EXIT_SUCCESS;
+*/
+
+
 
 /*
 
@@ -541,7 +679,18 @@ int main(int argc, const char** argv) {
 
 
 
-
+        /*									*\
+         *									*
+         * actual program starts here ;)    *
+         * 									*
+         * 									*
+         * 									*
+         * 									*
+         * 									*
+         * 									*
+         * 									*
+         * 									*
+        \*									*/
 
 
 
