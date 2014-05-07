@@ -6,13 +6,20 @@
  Copyright   : CC BY-SA 4.0
  Description : Scan and Remove Adapter
  ============================================================================
+
+
+
+
+- additional information, scripts, links:
+	~/adapterremoval
+
+
+
  */
 
 
 
 #include <time.h>
-#include <string.h>
-
 #include <unistd.h>     /* Symbolic Constants */
 #include <sys/types.h>  /* Primitive System Data Types */
 #include <errno.h>      /* Errors */
@@ -24,11 +31,46 @@
 #include "optlist.h"	/* parse parameters from cmd line */
 
 
+
+
+// defines
+
 #define MAXREADLEN 500
 
+#define MAXCOUNT 5
+
+#define READER1  50000
+#define READER2 100000
+#define READER3	400000
+#define READER4 800000
+#define WRITER1  150000
 
 
-typedef struct str_thdata
+
+
+static int data = 1;
+
+
+// structs
+
+typedef struct {
+	pthread_mutex_t *mut;
+	int writers;
+	int readers;
+	int waiting;
+	pthread_cond_t *writeOK, *readOK;
+} rwl;
+
+typedef struct {
+	rwl *lock;
+	int id;
+	long delay;
+} rwargs;
+
+
+
+
+typedef struct pe_data
 {
 /*
  * struct to hold read data to be passed to the threads
@@ -44,9 +86,48 @@ typedef struct str_thdata
     char phred2[MAXREADLEN];
 
     int processed;
-} thdata;
+} pedata;
 
 
+
+typedef struct se_data
+{
+/*
+ * struct to hold read data to be passed to the threads
+ */
+    //int thread_no;
+    char readID1[MAXREADLEN];
+    char read1[MAXREADLEN];
+    char phred1[MAXREADLEN];
+} sedata;
+
+
+
+
+
+
+// prototypes
+
+rwl *initlock(void);
+void readlock(rwl *lock, int d);
+void writelock(rwl *lock, int d);
+void readunlock(rwl *lock);
+void writeunlock(rwl *lock);
+void deletelock(rwl *lock);
+rwargs *init_thread_data (rwl *l, int i, long d);
+void *read_processing_thread (void *args);
+void *read_providing_thread (void *args);
+
+
+
+
+
+
+
+
+
+
+// functions
 
 
 
@@ -89,85 +170,18 @@ int file_exists(const char * filename)
 }
 
 
-
-
-char ** get_random_entries(FILE *fp, unsigned int N)
+void remove_newline(char * line)
 {
-	/*
-	 *
-	 * open file and get N-many random entries
-	 *
-	 * not working version
-	 *
-	 */
-
-  long int file_length;
-  fseek(fp, 0, SEEK_END);
-
-  if (fseek(fp, 0, SEEK_END)) {
-    puts("Error while seeking to end of file");
-    return NULL;
-  }
-  char ** seqlist = (char**) malloc(sizeof(char*) * N);
-
-  file_length = ftell(fp);
-  printf("file len: %li\n", file_length);
-
-  int i = 0;
-  unsigned long seekpos;
-
-  char sep[MAXREADLEN];
-  char seq[MAXREADLEN];
-  char qual[MAXREADLEN];
-  char header[MAXREADLEN];
-
-  while (i <= N) {
-    //unsigned long seekpos =(rand() % (file_length - 5*MAXREADLEN)); //don't go beyond end of file - ensure >5 maxlen lines
-    seekpos = (rand() % (file_length - 1000));
-    fseek(fp, seekpos, SEEK_SET);
-
-    while (1) {
-      if (NULL == fgets(sep, sizeof(sep), fp)) { break; }
-      else {
-	printf("%s", sep);
-
-	if ('+' == sep[0] && strlen(sep) == 2) {
-	  fgets(header, MAXREADLEN-1, fp);
-	  fgets(header, MAXREADLEN-1, fp);
-
-	  if ('@' == header[0]) {
-	    //got a valid entry
-	    fgets(seq, MAXREADLEN-1, fp);
-	    fgets(sep, MAXREADLEN-1, fp);
-	    fgets(qual, MAXREADLEN-1, fp);
-	    printf("^ is valid entry.\nSeq is:%s", seq);
-
-	    seqlist[i] = malloc(sizeof(char) * (strlen(seq) + 1));
-	    strncpy(seqlist[i], seq, strlen(seq));
-	    // seqlist[i][strlen(seq)] = '\0';
-	    //seqlist[i] = strdup(seq);
-	    printf("XX:%s\n", seqlist[i]);
-	    ++i;
-
-
-
-	    break;
-	  }
-	}
-      }
-
-
-    }
-  }
-
-  return seqlist;
-
+  int len = (int)strlen(line) - 1;
+  if(line[len] == '\n') { line[len] = 0; }
+  return ;
 }
 
 
 
 
-char ** get_random_entry(FILE *fp, unsigned int entrynum) //, char** seqlist)
+
+sedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
 {
 	/*
 	 *
@@ -176,6 +190,7 @@ char ** get_random_entry(FILE *fp, unsigned int entrynum) //, char** seqlist)
 	 * working version
 	 *
 	 */
+
 
     long int file_length;
 
@@ -193,18 +208,13 @@ char ** get_random_entry(FILE *fp, unsigned int entrynum) //, char** seqlist)
     srand(time(NULL));
 
 
-    //char** seqlist = (char**)malloc(sizeof(char*) * entrynum);
-    char** seqlist = (char**)malloc(sizeof(char*) * entrynum);
 
-    char line1[MAXREADLEN];
-    char line2[MAXREADLEN];
-    char line3[MAXREADLEN];
-    //char * line3=(char*)malloc(MAXREADLEN);
-    char line4[MAXREADLEN];
-    char line5[MAXREADLEN];
+	sedata** struclist = (sedata**)malloc(sizeof(sedata*) * N);
+	char currline[MAXREADLEN];
+
 
     int x;
-    for (x = 0; x < entrynum; x++)
+    for (x = 0; x < N; ++x)
     {
         //@DEBUG: oh!
         unsigned long seekpos =(rand() % (file_length - 1000)); //don't go beyond end of file - ensure >5 maxlen lines
@@ -212,46 +222,36 @@ char ** get_random_entry(FILE *fp, unsigned int entrynum) //, char** seqlist)
         fseek(fp, seekpos, SEEK_SET);
         while (1)
         {
-            if (NULL == fgets(line1, sizeof(line1), fp)){break;}
+            if (NULL == fgets(currline, sizeof(currline), fp)){break;}
             else{
                 //printf("line1 %s\n", line1);
-                if ('+'==line1[0] && strlen(line1)==2)
+                if ('+'==currline[0] && strlen(currline)==2)
                 {
-                    fgets(line2, MAXREADLEN-1, fp); //skip
-                    fgets(line2, MAXREADLEN-1, fp); //first line with ^@ID
+                    fgets(currline, MAXREADLEN-1, fp); //skip
+                    fgets(currline, MAXREADLEN-1, fp); //first line with ^@ID
 
-                    if ('@'==line2[0])
+                    if ('@'==currline[0])
                     {
-                        //got a valid entry
-                        fgets(line3, MAXREADLEN-1, fp); //nucl seq
-                        fgets(line4, MAXREADLEN-1, fp); //+
-                        fgets(line5, MAXREADLEN-1, fp); //qual seq
+                		sedata *data1=(sedata*)malloc(sizeof(sedata));
 
-                        seqlist[x]=strdup(line3);
-                        //seqlist[x]=line3;
-//                        printf("l3 %s\n", line3);
-//                        printf("sl %s\n", seqlist[x]);
-                        /*
-                        sprintf((*seqlist)[x], "%d", x); //line3;
-                        printf("l3 %s\n", line3);
-                        printf("sl %s\n", (*seqlist)[x]);
-                        int a;
-                        for (a = 0; a < x; a++)
-                        {
-                            printf("%i\t", a);
-                            printf("%s", seqlist[a]);
-                        }
-*/
+                		strcpy(data1->readID1, currline);
+                		if (NULL == fgets(data1->read1, MAXREADLEN-1, fp)){break;}
+                		if (NULL == fgets(data1->phred1, MAXREADLEN-1, fp)){break;} // skip this line
+                		if (NULL == fgets(data1->phred1, MAXREADLEN-1, fp)){break;}
 
+                		remove_newline(data1->readID1);
+                		remove_newline(data1->read1);
+                		remove_newline(data1->phred1);
+
+                		struclist[x]=data1;
                         break;
-
                     }
                 }
             }
         }
     }
 
-    return seqlist;
+    return struclist;
 }
 
 
@@ -270,7 +270,7 @@ char ** get_random_entry(FILE *fp, unsigned int entrynum) //, char** seqlist)
 
 
 
-char** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
+pedata** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
 /*
  *
  * returns struct of next N-many reads fetched from files
@@ -282,13 +282,13 @@ char** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
  * fpR2 is NULL for single-end data
  *
  *
- * breaks need to be replace by proper error handling
+ * TODO breaks need to be replaced by proper error handling
  *
- *TODO: hmm, glaube der hat die daten nur intern, liefert sie aber nicht ordentlich zurück wegen **liste...
  */
 {
 
-	thdata** struclist = (thdata**)malloc(sizeof(thdata*) * N);
+	pedata** struclist = (pedata**)malloc(sizeof(pedata*) * N);
+
 
     char readID1[MAXREADLEN];
     char readID2[MAXREADLEN];
@@ -303,49 +303,32 @@ char** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
     int i;
 	for  (i=0; i<N; i++)
 	{
-		thdata data1;
-		if (NULL == fgets(data1.readID1, sizeof(readID1), fpR1)){break;}
-		if (NULL == fgets(data1.read1, sizeof(read1), fpR1)){break;}
-		if (NULL == fgets(data1.phred1, sizeof(phred1), fpR1)){break;}
-		if (NULL == fgets(data1.phred1, sizeof(phred1), fpR1)){break;}
+		pedata *data1=(pedata*)malloc(sizeof(pedata));
+		if (NULL == fgets(data1->readID1, sizeof(readID1), fpR1)){break;}
+		if (NULL == fgets(data1->read1, sizeof(read1), fpR1)){break;}
+		if (NULL == fgets(data1->phred1, sizeof(phred1), fpR1)){break;} // skip the + line
+		if (NULL == fgets(data1->phred1, sizeof(phred1), fpR1)){break;}
+
+		remove_newline(data1->readID1);
+		remove_newline(data1->read1);
+		remove_newline(data1->phred1);
+
 		if (fpR2!=NULL)
 		{
-			if (NULL == fgets(data1.readID2, sizeof(readID2), fpR2)){break;}
-			if (NULL == fgets(data1.read2, sizeof(read2), fpR2)){break;}
-			if (NULL == fgets(data1.phred2, sizeof(phred2), fpR2)){break;}
-			if (NULL == fgets(data1.phred2, sizeof(phred2), fpR2)){break;}
+			if (NULL == fgets(data1->readID2, sizeof(readID2), fpR2)){break;}
+			if (NULL == fgets(data1->read2, sizeof(read2), fpR2)){break;}
+			if (NULL == fgets(data1->phred2, sizeof(phred2), fpR2)){break;} // skip the + line
+			if (NULL == fgets(data1->phred2, sizeof(phred2), fpR2)){break;}
+
+			remove_newline(data1->readID2);
+			remove_newline(data1->read2);
+			remove_newline(data1->phred2);
 		}
 
-		/*
-		if (NULL == fgets(readID1, sizeof(readID1), fpR1)){break;}
-		if (NULL == fgets(read1, sizeof(read1), fpR1)){break;}
-		if (NULL == fgets(phred1, sizeof(phred1), fpR1)){break;}
-		if (NULL == fgets(phred1, sizeof(phred1), fpR1)){break;}
-		if (fpR2!=NULL)
-		{
-			if (NULL == fgets(readID2, sizeof(readID2), fpR2)){break;}
-			if (NULL == fgets(read2, sizeof(read2), fpR2)){break;}
-			if (NULL == fgets(phred2, sizeof(phred2), fpR2)){break;}
-			if (NULL == fgets(phred2, sizeof(phred2), fpR2)){break;}
-		}
+        data1->processed=0;
+		data1->thread_no = N;
 
-		puts("---");
-		printf("%s%s\n", readID1, readID2);
-		printf("%s%s\n", read1, read2);
-		printf("%s%s\n", phred1, phred2);
-		*/
-
-        data1.processed=0;
-		data1.thread_no = N;
-
-
-		//TODO: wie kann ich das beheben?
-		//struclist[i]=data1;
-
-		printf(":1 %s%s\n", data1.readID1, data1.readID2);
-		printf(":2 %s%s\n", data1.read1, data1.read2);
-		printf(":3 %s%s\n", data1.phred1, data1.phred2);
-
+		struclist[i]=data1;
 	}
 
 	return struclist;
@@ -357,15 +340,13 @@ char** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
 
 
 
+
+
+
 /*****************
- * begin phred stuff
+ *
+ * begin trimming stuff
  */
-
-
-/* adapted from sickle */
-#define Q_OFFSET 0
-#define Q_MIN 1
-#define Q_MAX 2
 
 static const char typenames[4][10] = {
 	{"Phred"},
@@ -375,67 +356,28 @@ static const char typenames[4][10] = {
 };
 
 static const int quality_constants[4][3] = {
-  /* offset, min, max */
+  /* offset, min, max
+   *
+ S - Sanger        Phred+33,  raw reads typically (0, 40)
+ X - Solexa        Solexa+64, raw reads typically (-5, 40)
+ I - Illumina 1.3+ Phred+64,  raw reads typically (0, 40)
+ J - Illumina 1.5+ Phred+64,  raw reads typically (3, 40)
+     with 0=unused, 1=unused, 2=Read Segment Quality Control Indicator (bold)
+     (Note: See discussion above).
+ L - Illumina 1.8+ Phred+33,  raw reads typically (0, 41)
+ */
+
+
+
   {0, 4, 60}, /* PHRED */
   {33, 33, 126}, /* SANGER */
   {64, 58, 112}, /* SOLEXA; this is an approx; the transform is non-linear */
   {64, 64, 110} /* ILLUMINA */
 };
 
-int get_quality_num (char qualchar, int qualtype, void *fqrec, int pos) {
-  /*
-   * sickle says:
-     Return the adjusted quality, depending on quality type.
-
-     Note that this uses the array in sickle.h, which *approximates*
-     the SOLEXA (pre-1.3 pipeline) qualities as linear. This is
-     inaccurate with low-quality bases.
 
 
-	int get_quality_num (char qualchar, int qualtype, kseq_t *fqrec, int pos) {
-
-  */
-
-  int qual_value = (int) qualchar;
-
-  if (qual_value < quality_constants[qualtype][Q_MIN] || qual_value > quality_constants[qualtype][Q_MAX]) {
-	fprintf (stderr, "ERROR: Quality value (%d) does not fall within correct range for %s encoding.\n", qual_value, typenames[qualtype]);
-	fprintf (stderr, "Range for %s encoding: %d-%d\n", typenames[qualtype], quality_constants[qualtype][Q_MIN], quality_constants[qualtype][Q_MAX]);
-	//fprintf (stderr, "FastQ record: %s\n", fqrec->name.s);
-	//fprintf (stderr, "Quality string: %s\n", fqrec->qual.s);
-	fprintf (stderr, "Quality char: '%c'\n", qualchar);
-	fprintf (stderr, "Quality position: %d\n", pos+1);
-	exit(1);
-  }
-
-  return (qual_value - quality_constants[qualtype][Q_OFFSET]);
-}
-
-
-
-
-
-
-int *detect_phred_type(void *ptr)
-{
-	/*
-	 * idea it to use char distribution of samples to judge on sequencing type
-	 *
-	 *TODO to be implemented.
-	 *
-	 *
-	# set regular expressions
-	my $sanger_regexp = qr/[!"#$%&'()*+,-.\/0123456789:]/;
-	my $solexa_regexp = qr/[\;<=>\?]/;
-	my $solill_regexp = qr/[JKLMNOPQRSTUVWXYZ\[\]\^\_\`abcdefgh]/;
-	my $all_regexp = qr/[\@ABCDEFGHI]/;
-	*/
-	return 0;
-}
-
-
-
-void trim_read(void *ptr)
+void trim_read(pedata *readpair, int qualtype)
 {
 	/*
 	 * do quality-based read trimming
@@ -443,7 +385,54 @@ void trim_read(void *ptr)
 	 *
 	 *TODO to be implemented.
 	 *
+	 *
+	 * adopted from sickle
+	 * sickle says:
+     Return the adjusted quality, depending on quality type.
+
+     Note that this uses the array in sickle.h, which *approximates*
+     the SOLEXA (pre-1.3 pipeline) qualities as linear. This is
+     inaccurate with low-quality bases.
 	 */
+
+	#define Q_OFFSET 0
+	#define Q_MIN 1
+	#define Q_MAX 2
+
+	puts("trimming");
+    printf(": %s", readpair->readID1);
+    printf(": %s", readpair->read1);
+    printf(": %s", readpair->phred1);
+
+	int pos;
+	int qualvalue;
+
+	int * quallist = (int*)malloc(sizeof(int)*strlen(readpair->phred1)) ;
+
+	char qualchar;
+	for (pos=0; pos<strlen(readpair->phred1); pos++)
+	{
+		qualchar=readpair->phred1[pos];
+		qualvalue = (int) qualchar;
+		printf("%c\t%d\n", qualchar, qualvalue);
+
+		if (qualvalue < quality_constants[qualtype][Q_MIN] || qualvalue > quality_constants[qualtype][Q_MAX]) {
+			fprintf (stderr, "ERROR: Quality value (%d) does not fall within correct range for %s encoding.\n", qualvalue, typenames[qualtype]);
+			fprintf (stderr, "Range for %s encoding: %d-%d\n", typenames[qualtype], quality_constants[qualtype][Q_MIN], quality_constants[qualtype][Q_MAX]);
+			fprintf (stderr, "Read ID: %s\n", readpair->readID1);
+			fprintf (stderr, "FastQ record: %s\n", readpair->read1);
+			fprintf (stderr, "Quality string: %s\n", readpair->phred1);
+			fprintf (stderr, "Quality char: '%c'\n", qualchar);
+			fprintf (stderr, "Quality position: %d\n", pos+1);
+			exit(1);
+		  }
+		qualvalue -= quality_constants[qualtype][Q_OFFSET];
+
+
+		quallist[pos]=qualvalue;
+	}
+
+
 
 
 	return;
@@ -451,7 +440,8 @@ void trim_read(void *ptr)
 
 
 /*****************
- * end phred stuff
+ *
+ * end trimming stuff
  */
 
 
@@ -459,244 +449,14 @@ void trim_read(void *ptr)
 
 
 
-/*
- * begin thread based stuff
- */
 
-void *do_loop(void *ptr)
+
+
+
+
+
+int main(int argc, const char** argv)
 {
-    thdata *data;
-    data = (thdata *) ptr;  /* type cast to a pointer to thdata */
-
-
-    int me = data->thread_no;     /* thread identifying number */
-
-    int d = rand() % me;
-    ++d;
-    printf("id '%d': delay: %d\n", me, d);
-    nanosleep((struct timespec[]){{d, 0}}, NULL);
-
-    /* do the work */
-    printf("Thread %d read1 %s \n", data->thread_no, data->read1);
-    printf("Thread %d read2 %s \n", data->thread_no, data->read2);
-
-
-    //ptr
-    data->processed=1;
-
-
-    /* terminate the thread */
-    pthread_exit(NULL);
-}
-
-/*
- * end thread based stuff
- */
-
-
-
-
-
-
-
-int main(int argc, const char** argv) {
-
-    unsigned short number_of_threads=5;
-
-    srand(time(NULL));
-
-    puts("main");
-
-
-
-
-
-
-    /*
-     * geht nicht :(
-     *
-     *
-     *
-    //TODO warum geht das nicht mit [number_of_threads]
-	//int curr_threads[10];
-	pthread_t thread_id[10];
-	thdata data[10];
-
-	//int i, j,k;
-	int k;
-
-	   for(k=0; k < number_of_threads; k++)
-	   {
-           data[k].thread_no = k;
-           //printf("%d", k);
-
-           data[k].processed=0;
-           char * sd;
-           sprintf(sd, "X %d", k*3);
-           //puts(sd);
-           strcpy(data[k].read1, sd);
-           strcpy(data[k].read2, sd);
-
-           printf(">>> %d %s  %s\n", k, data[k].read1, data[k].read2);
-
-
-	      //pthread_create( &thread_id[k], NULL, do_loop, (void*)&data[k]);
-	   }
-
-	   puts("fff");
-
-	   / *
-	   for(k=0; k < number_of_threads; k++)
-	   {
-	      pthread_join( thread_id[k], NULL);
-	   }
-
-	   sleep(10);
-*/
-
-
-
-    /* ging :)
-	int k;
-        for (k=0; k<number_of_threads;k++)
-        {
-
-        	thdata data1;
-            pthread_t  p_thread;       // thread's structure
-
-            data1.thread_no = k;
-            printf("%d", k);
-
-            data1.processed=0;
-            char * sd;
-            sprintf(sd, "Hello! %d", k);
-            puts(sd);
-            strcpy(data1.read1, sd);
-            strcpy(data1.read2, sd);
-
-
-            int        thr_id;         // thread ID for the newly created thread
-            thr_id =
-            //curr_threads[k]=
-            		pthread_create(&p_thread, NULL, do_loop, (void*)&data1);
-
-
-            //pthread_create (&curr_thread, NULL, (void *) &print_message_function, (void *) &curr_data);
-            // Main block now waits for both threads to terminate, before it exits
-            //   If main block exits, both threads exit, even if the threads have not
-            //   finished their work
-            //pthread_join(thr_id, NULL);
-        }
-        sleep(1);
-        //int b = 1;
-        //do_loop((void*)&b);
-
-        puts("done!");
-
-
-
-
-
-
-
-        return EXIT_SUCCESS;
-*/
-
-
-
-/*
-
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // THREADING EXAMPLE
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    //while(1)
-    {
-		int k;
-		for (k=0; k<number_of_threads;k++)
-		{
-
-			thdata data1;
-			pthread_t  p_thread;       // thread's structure
-
-			data1.thread_no = k;
-			printf("%d", k);
-
-			data1.processed=0;
-			char * sd;
-			sprintf(sd, "Hello! %d", k);
-			puts(sd);
-			strcpy(data1.read1, sd);
-			strcpy(data1.read2, sd);
-
-
-			// thread ID for the newly created thread
-			//curr_threads[k] =
-			int thr_id;
-			thr_id=		pthread_create(&p_thread, NULL, do_loop, (void*)&data1);
-
-
-			//pthread_create (&curr_thread, NULL, (void *) &print_message_function, (void *) &curr_data);
-			/* Main block now waits for both threads to terminate, before it exits
-			   If main block exits, both threads exit, even if the threads have not
-			   finished their work * /
-		//    pthread_join(thr_id, NULL);
-		}
-		int b = 1;
-		do_loop((void*)&b);
-
-
-
-		/*
-	    puts("next round!");
-
-	    for (k=0; k<number_of_threads;k++)
-	    {
-	    	printf("%d", curr_threads[k]);
-
-	    }
-		 * /
-		//break;
-
-
-    }
-
-    return EXIT_SUCCESS;
-
-*/
-
-
-
-
-
-
-
-
-
-
-
-
-
-        /*									*\
-         *									*
-         * actual program starts here ;)    *
-         * 									*
-         * 									*
-         * 									*
-         * 									*
-         * 									*
-         * 									*
-         * 									*
-         * 									*
-        \*									*/
-
-
-
-
-
-
 
     //TODO ENABLE WHEN DONE
     if (0) {
@@ -749,6 +509,67 @@ int main(int argc, const char** argv) {
 
 
 
+
+    unsigned short number_of_threads=5;
+
+    srand(time(NULL));
+
+
+
+
+	pthread_t r1, r2, r3, r4, w1;
+	rwargs *a1, *a2, *a3, *a4, *a5;
+	rwl *lock;
+
+	lock = initlock();
+	a1 = init_thread_data (lock, 1, WRITER1);
+	pthread_create (&w1, NULL, read_providing_thread, a1);
+
+
+
+	a2 = init_thread_data (lock, 1, READER1);
+	a3 = init_thread_data (lock, 2, READER2);
+	a4 = init_thread_data (lock, 3, READER3);
+	a5 = init_thread_data (lock, 4, READER4);
+
+	pthread_create (&r1, NULL, read_processing_thread, a2);
+	pthread_create (&r2, NULL, read_processing_thread, a3);
+	pthread_create (&r3, NULL, read_processing_thread, a4);
+	pthread_create (&r4, NULL, read_processing_thread, a5);
+
+	pthread_join (w1, NULL);
+	pthread_join (r1, NULL);
+	pthread_join (r2, NULL);
+	pthread_join (r3, NULL);
+	pthread_join (r4, NULL);
+
+
+	//finalize
+	free(a1);
+	free(a2);
+	free(a3);
+	free(a4);
+	free(a5);
+
+
+
+
+
+
+	return 0;
+
+
+
+
+
+
+
+
+
+
+
+
+
       //char *fn1 = argv[1];
     char * fn1="/home/thieme/eclipse-workspace/SandRA/test.fastq";
     char * fn2="/home/thieme/eclipse-workspace/SandRA/test.fastq";
@@ -771,35 +592,43 @@ int main(int argc, const char** argv) {
         exit(EXIT_FAILURE);
       }
 
-    FILE *fn1p = fopen(fn1, "r");
-    FILE *fn2p = fopen(fn2, "r");
 
 
 
 
+
+    if (0)
+    {
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // get random entries
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/*
-    char ** c=NULL;
-    c = get_random_entry(fn1p, 5);
-    //c = get_random_entries(fn1p, 5);
 
+    FILE *fnrnd = fopen(fn1, "r");
+
+    sedata ** c=NULL;
+    c = get_random_entry(fnrnd, 5);
 
     int a2;
     for (a2 = 0; a2 < 4; a2++)
     {
-        printf(">>%i\n", a2);
-        printf("%s", c[a2]);
+        //int thread_no;
+        //char [MAXREADLEN];
+    	printf(">>%i\n", a2);
+        printf(": %s", c[a2]->readID1);
+        printf(": %s", c[a2]->read1);
+        printf(": %s", c[a2]->phred1);
     }
 
+    fclose(fnrnd);
 
-    fclose(fn1p);
-    fclose(fn2p);
-*/
+
+
+
+    return EXIT_SUCCESS;
+    }
 
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -807,80 +636,40 @@ int main(int argc, const char** argv) {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // trim reads
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    char ** c=NULL;
-    c = get_next_reads_to_process(fn1p,fn2p, 3);
+    FILE *fn1p = fopen(fn1, "r");
+    FILE *fn2p = fopen(fn2, "r");
+
+    pedata ** c2=NULL;
+    c2 = get_next_reads_to_process(fn1p,fn2p, 3);
     puts("::::::::::::::::::");
-    c = get_next_reads_to_process(fn1p,fn2p, 2);
+    c2 = get_next_reads_to_process(fn1p,fn2p, 20);
 
 
-    int a2;
-    for (a2 = 0; a2 < 4; a2++)
+
+
+    int qualtype = 3; //assuming illumina
+
+
+    int a22;
+    for (a22 = 0; a22 < 4; a22++)
     {
-        printf(">>%i\n", a2);
-        printf("%s", c[a2]);
+        //int thread_no;
+        //char [MAXREADLEN];
+    	printf(">>%i\n", a22);
+        printf("%s", c2[a22]->readID1);
+
+
+        trim_read(c2[a22], qualtype);
     }
 
 
 
-
-
-
-
-
-
-
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // THREADING EXAMPLE
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    /*
-    int k;
-    for (k=0; k<number_of_threads;k++)
-    {
-
-    	thdata data1;
-        pthread_t  p_thread;       // thread's structure
-
-        data1.thread_no = k;
-        printf("%d", k);
-
-        data1.processed=0;
-        char * sd;
-        sprintf(sd, "Hello! %d", k);
-        puts(sd);
-        strcpy(data1.read1, sd);
-        strcpy(data1.read2, sd);
-
-
-        int        thr_id;         // thread ID for the newly created thread
-        thr_id =
-        pthread_create(&p_thread, NULL, do_loop, (void*)&data1);
-
-
-        //pthread_create (&curr_thread, NULL, (void *) &print_message_function, (void *) &curr_data);
-        /* Main block now waits for both threads to terminate, before it exits
-           If main block exits, both threads exit, even if the threads have not
-           finished their work * /
-    //    pthread_join(thr_id, NULL);
-    }
-    int b = 1;
-    do_loop((void*)&b);
-
-*/
-
-    puts("done!");
-
-
-
-
+    fclose(fn1p);
+    fclose(fn2p);
 
 
 
     return EXIT_SUCCESS;
-
-    //dummy.
-
 
 }
 
@@ -891,3 +680,197 @@ int main(int argc, const char** argv) {
 
 
 
+
+
+
+
+
+
+/*
+ * begin thread based stuff
+ */
+
+
+
+rwargs *init_thread_data (rwl *l, int i, long d)
+{
+	/*
+	 *
+	 * init object for each thread
+	 *
+	 */
+
+
+	rwargs *args;
+	args = (rwargs *)malloc (sizeof (rwargs));
+	if (args == NULL) return (NULL);
+	args->lock = l;
+	args->id = i;
+	args->delay = d;
+	return (args);
+}
+
+void *read_processing_thread (void *args)
+{
+	/*
+	 *
+	 * consumer
+	 *
+	 *
+	 */
+
+
+	rwargs *a;
+	int d;
+
+	a = (rwargs *)args;
+
+	do {
+		readlock (a->lock, a->id);
+		d = data;
+		usleep (a->delay);
+		readunlock (a->lock);
+		printf ("Trimmer %d : Data = %d\n", a->id, d);
+		usleep (a->delay);
+	} while (d != 0);
+	printf ("Trimmer %d: Finished.\n", a->id);
+
+	return (NULL);
+}
+
+void *read_providing_thread (void *args)
+{
+	/*
+	 *
+	 * producer
+	 *
+	 *
+	 */
+
+
+	rwargs *a;
+	int i;
+
+	a = (rwargs *)args;
+
+	for (i = 2; i < MAXCOUNT; i++) {
+		writelock (a->lock, a->id);
+		data = i;
+		usleep (a->delay);
+		writeunlock (a->lock);
+		printf ("read_providing_thread %d: Wrote %d\n", a->id, i);
+		usleep (a->delay);
+	}
+	printf ("read_providing_thread %d: Finishing...\n", a->id);
+	writelock (a->lock, a->id);
+	data = 0;
+	writeunlock (a->lock);
+	printf ("read_providing_thread %d: Finished.\n", a->id);
+
+	return (NULL);
+}
+
+
+
+
+
+/*
+ * thread locking
+ */
+
+rwl *initlock (void)
+{
+	/*
+	 *
+	 * malloc and init with 0
+	 *
+	 *
+	 */
+
+
+	rwl *lock;
+	lock = (rwl *)malloc (sizeof (rwl));
+	if (lock == NULL) return (NULL);
+
+	lock->mut = (pthread_mutex_t *) malloc (sizeof (pthread_mutex_t));
+	if (lock->mut == NULL) { free (lock); return (NULL); }
+
+	lock->writeOK =		(pthread_cond_t *) malloc (sizeof (pthread_cond_t));
+	if (lock->writeOK == NULL) { free (lock->mut); free (lock); return (NULL); }
+
+	lock->readOK =		(pthread_cond_t *) malloc (sizeof (pthread_cond_t));
+	if (lock->writeOK == NULL) { free (lock->mut); free (lock->writeOK); free (lock); return (NULL); }
+
+	pthread_mutex_init (lock->mut, NULL);
+	pthread_cond_init (lock->writeOK, NULL);
+	pthread_cond_init (lock->readOK, NULL);
+	lock->readers = 0;
+	lock->writers = 0;
+	lock->waiting = 0;
+
+	return (lock);
+}
+
+void readlock (rwl *lock, int d)
+{
+	pthread_mutex_lock (lock->mut);
+	if (lock->writers || lock->waiting)
+	{
+		do {
+			printf ("reader %d blocked.\n", d);
+			pthread_cond_wait (lock->readOK, lock->mut);
+			printf ("reader %d unblocked.\n", d);
+		} while (lock->writers);
+	}
+	lock->readers++;
+	pthread_mutex_unlock (lock->mut);
+
+	return;
+}
+
+void readunlock (rwl *lock)
+{
+	pthread_mutex_lock (lock->mut);
+	lock->readers--;
+	pthread_cond_signal (lock->writeOK);
+	pthread_mutex_unlock (lock->mut);
+}
+
+
+void writelock (rwl *lock, int d)
+{
+	pthread_mutex_lock (lock->mut);
+	lock->waiting++;
+	while (lock->readers || lock->writers) {
+		printf ("read_providing_thread %d blocked.\n", d);
+		pthread_cond_wait (lock->writeOK, lock->mut);
+		printf ("read_providing_thread %d unblocked.\n", d);
+	}
+	lock->waiting--;
+	lock->writers++;
+	pthread_mutex_unlock (lock->mut);
+
+	return;
+}
+
+void writeunlock (rwl *lock)
+{
+	pthread_mutex_lock (lock->mut);
+	lock->writers--;
+	pthread_cond_broadcast (lock->readOK);
+	pthread_mutex_unlock (lock->mut);
+}
+
+void deletelock (rwl *lock)
+{
+	pthread_mutex_destroy (lock->mut);
+	pthread_cond_destroy (lock->readOK);
+	pthread_cond_destroy (lock->writeOK);
+	free (lock);
+
+	return;
+}
+
+/*
+ * end thread based stuff
+ */
