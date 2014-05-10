@@ -229,25 +229,35 @@ void crop_end(char * line1, char * line2, int rem)
 	return ;
 }
 
+int is_valid_character(char c)
+{
+	switch(c)
+	{
+		case 'A': break;
+		case 'C': break;
+		case 'G': break;
+		case 'T': break;
+		default: return 0;
+	}
+	return 1;
+}
 
 
 
-int has_unwanted_characters(char * line)
+int valid_characters(char * line)
 {
 	int pos;
 	for (pos=0; pos<strlen(line); pos++)
 	{
-		 switch(line[pos])
-		 {
-		      case 'A': break;
-		      case 'C': break;
-		      case 'G': break;
-		      case 'T': break;
-		      default: return 0;
-		 }
+		if (!is_valid_character((line[pos])))
+		{
+		      return 0;
+		}
 	}
 	return 1;
 }
+
+
 
 
 
@@ -314,7 +324,7 @@ sedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
                 		if (NULL == fgets(data1->phred1, MAXREADLEN-1, fp)){break;} // skip this line
                 		if (NULL == fgets(data1->phred1, MAXREADLEN-1, fp)){break;}
 
-                		if ( !has_unwanted_characters(data1->read1))
+                		if ( valid_characters(data1->read1))
                 		{
                     		remove_newline(data1->readID1);
                     		remove_newline(data1->read1);
@@ -426,7 +436,62 @@ pedata** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
 
 
 
+void trim_to_longest_valid_section(char * read, char * phred)
+{
+	/*
+	 * find longest stretch of [ATCG]
+	 *
+	 * TODO: validate that's working properly on data in pe_struct
+	 */
+	int pos;
 
+	int longeststart=0;
+	int longestend=0;
+
+	int tmplongeststart=0;
+	int tmplongestend=0;
+
+
+	//determine longest continuous section
+	for (pos=0; pos<strlen(read); pos++)
+	{
+		//printf("%d\t%c\n", pos, read[pos]);
+		if (is_valid_character(read[pos]))
+		{
+			tmplongestend=pos;
+
+			if ((tmplongestend-tmplongeststart) >(longestend-longeststart))
+			{
+				longeststart=tmplongeststart;
+				longestend=tmplongestend;
+			}
+		}
+		else
+		{
+			tmplongeststart=pos;
+			tmplongestend=pos;
+		}
+		//printf("\t[%d:%d]\n", longeststart, longestend);
+
+
+	}
+
+
+	printf("N: N-caused trimming to [%d:%d] %d\n", longeststart, longestend, longestend-longeststart);
+	if (longestend<strlen(read))
+	{
+		//TODO woher kommt dieser offset? - speichere ich einen zyklus zu spät?
+		trim_end(read, phred, longestend+1);
+	}
+	if (longeststart>0)
+	{
+		//TODO woher kommt dieser offset? - speichere ich einen zyklus zu spät?
+		trim_start(read, phred, longeststart+1);
+	}
+
+	printf("N: %s\ny %s\n", read, phred);
+	return;
+}
 
 
 
@@ -727,6 +792,24 @@ int main(int argc, const char** argv)
 {
 
 
+	char * c = "GTGCTAGCTGATGCTGCGTAGCTGCATCTG";
+	char * p = "123456789012345678901234567890";
+
+    printf("%s\n", c);
+    trim_to_longest_valid_section(c, p);
+    printf("%s\n", c);
+
+	c = "GTGCNTAGCTGATGCTGCGTAGCTGCANTCTG";
+	p = "12345678901234567890123456789000";
+
+    printf("------\n%s\n", c);
+    trim_to_longest_valid_section(c, p);
+    printf("%s\n", c);
+
+
+
+	return 0;
+
 
 /*
 	char d = charToPhred33('J', xPHRED33);
@@ -811,6 +894,8 @@ int main(int argc, const char** argv)
     int minlen=0;	//discard reads with len < k
     int avgqual=0;	//discard reads with avgqual < k
 
+
+    int n_splitting=1; //get longest valid [ATCG] stretch of read
 
 
 
@@ -970,20 +1055,20 @@ int main(int argc, const char** argv)
     	printf("1l %s\n", readlist[readentrycnt]->read2);
 
 
+        if (trimend>0) //needs to go first, otherwise trimstart will change sequence length
+        {
+            trim_end(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1, trimend);
+            if (PE)
+            {
+            	trim_end(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2, trimend);
+            }
+        }
         if (trimstart>0)
         {
         	trim_start(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1, trimstart);
             if (PE)
             {
                 trim_start(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2, trimstart);
-            }
-        }
-        if (trimend>0)
-        {
-            trim_end(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1, trimend);
-            if (PE)
-            {
-            	trim_end(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2, trimend);
             }
         }
         if (cropstart>0)
@@ -1002,6 +1087,19 @@ int main(int argc, const char** argv)
             	crop_end(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2, cropend);
             }
         }
+
+
+
+
+        if (n_splitting>0)
+        {
+        	longest_valid_section(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1);
+			if (PE)
+			{
+	        	longest_valid_section(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2);
+			}
+        }
+
 
 
 
