@@ -45,7 +45,8 @@
 #define READER4 800000
 #define WRITER1  150000
 
-
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
 
 
 static int data = 1;
@@ -181,6 +182,77 @@ void remove_newline(char * line)
 
 
 
+void trim_start(char * line1, char * line2, int rem)
+{
+	/*
+	 * set read len to particular value
+	 */
+	int len = (int)strlen(line1);
+    //TODO :how can this be done inplace?!
+	sprintf(line1, line1+MIN(MAX(0,rem),len));
+	sprintf(line2, line2+MIN(MAX(0,rem),len));
+	return;
+}
+void trim_end(char * line1, char * line2, int rem)
+{
+	/*
+	 * set read len to rem
+	 */
+	int len = (int)strlen(line1);
+	line1[MIN(MAX(0,rem),len)] = 0;
+	line2[MIN(MAX(0,rem),len)] = 0;
+	return ;
+}
+
+
+
+void crop_start(char * line1, char * line2, int rem)
+{
+	/*
+	 * remove rem-many leading chars
+	 * move start to pos rem
+	 */
+	int len = (int)strlen(line1);
+    //TODO :how can this be done inplace?!
+	sprintf(line1, line1+MIN(MAX(0,rem),len));
+	sprintf(line2, line2+MIN(MAX(0,rem),len));
+	return;
+}
+void crop_end(char * line1, char * line2, int rem)
+{
+	/*
+	 * remove rem-many trailing chars
+	 */
+	int len = (int)strlen(line1);
+	line1[MIN(MAX(0,len-rem),len)] = 0;
+	line2[MIN(MAX(0,len-rem),len)] = 0;
+	return ;
+}
+
+
+
+
+int has_unwanted_characters(char * line)
+{
+	int pos;
+	for (pos=0; pos<strlen(line); pos++)
+	{
+		 switch(line[pos])
+		 {
+		      case 'A': break;
+		      case 'C': break;
+		      case 'G': break;
+		      case 'T': break;
+		      default: return 0;
+		 }
+	}
+	return 1;
+}
+
+
+
+
+
 sedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
 {
 	/*
@@ -222,7 +294,10 @@ sedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
         fseek(fp, seekpos, SEEK_SET);
         while (1)
         {
-            if (NULL == fgets(currline, sizeof(currline), fp)){break;}
+            //TODO: if no +-@-combination is present we'll get stuck here
+
+
+        	if (NULL == fgets(currline, sizeof(currline), fp)){break;}
             else{
                 //printf("line1 %s\n", line1);
                 if ('+'==currline[0] && strlen(currline)==2)
@@ -239,12 +314,21 @@ sedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
                 		if (NULL == fgets(data1->phred1, MAXREADLEN-1, fp)){break;} // skip this line
                 		if (NULL == fgets(data1->phred1, MAXREADLEN-1, fp)){break;}
 
-                		remove_newline(data1->readID1);
-                		remove_newline(data1->read1);
-                		remove_newline(data1->phred1);
+                		if ( !has_unwanted_characters(data1->read1))
+                		{
+                    		remove_newline(data1->readID1);
+                    		remove_newline(data1->read1);
+                    		remove_newline(data1->phred1);
 
-                		struclist[x]=data1;
-                        break;
+                    		struclist[x]=data1;
+                            break;
+                		}
+                		else
+                		{
+                			free(data1);
+                		}
+
+
                     }
                 }
             }
@@ -289,40 +373,44 @@ pedata** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
 
 	pedata** struclist = (pedata**)malloc(sizeof(pedata*) * N);
 
-
-    char readID1[MAXREADLEN];
-    char readID2[MAXREADLEN];
-
-    char read1[MAXREADLEN];
-    char read2[MAXREADLEN];
-
-    char phred1[MAXREADLEN];
-    char phred2[MAXREADLEN];
-
+    char tmpline[MAXREADLEN];
 
     int i;
 	for  (i=0; i<N; i++)
 	{
 		pedata *data1=(pedata*)malloc(sizeof(pedata));
-		if (NULL == fgets(data1->readID1, sizeof(readID1), fpR1)){break;}
-		if (NULL == fgets(data1->read1, sizeof(read1), fpR1)){break;}
-		if (NULL == fgets(data1->phred1, sizeof(phred1), fpR1)){break;} // skip the + line
-		if (NULL == fgets(data1->phred1, sizeof(phred1), fpR1)){break;}
+		if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;}
+		remove_newline(tmpline);
+		strcpy(data1->readID1, tmpline);
+		if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;}
+		remove_newline(tmpline);
+		strcpy(data1->read1, tmpline);
+		if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;} // skip the + line
+		if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;}
+		remove_newline(tmpline);
+		strcpy(data1->phred1, tmpline);
 
-		remove_newline(data1->readID1);
-		remove_newline(data1->read1);
-		remove_newline(data1->phred1);
+		//TODO insert phred conversion
+		//charToPhred33
+
 
 		if (fpR2!=NULL)
 		{
-			if (NULL == fgets(data1->readID2, sizeof(readID2), fpR2)){break;}
-			if (NULL == fgets(data1->read2, sizeof(read2), fpR2)){break;}
-			if (NULL == fgets(data1->phred2, sizeof(phred2), fpR2)){break;} // skip the + line
-			if (NULL == fgets(data1->phred2, sizeof(phred2), fpR2)){break;}
+			if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;}
+			remove_newline(tmpline);
+			strcpy(data1->readID2, tmpline);
+			if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;}
+			remove_newline(tmpline);
+			strcpy(data1->read2, tmpline);
+			if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;} // skip the + line
+			if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;}
+			remove_newline(tmpline);
 
-			remove_newline(data1->readID2);
-			remove_newline(data1->read2);
-			remove_newline(data1->phred2);
+			//TODO insert phred conversion
+			//charToPhred33
+
+
+			strcpy(data1->phred2, tmpline);
 		}
 
         data1->processed=0;
@@ -348,92 +436,272 @@ pedata** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
  * begin trimming stuff
  */
 
-static const char typenames[4][10] = {
-	{"Phred"},
-	{"Sanger"},
-	{"Solexa"},
-	{"Illumina"}
+/*
+#define xSANGER		0 	//S - Sanger        Phred+33,  raw reads typically (0, 40)
+#define xSOLEXA		1	//X - Solexa        Solexa+64, raw reads typically (-5, 40)
+#define xILLUMINA13	2	//I - Illumina 1.3+ Phred+64,  raw reads typically (0, 40)
+#define xILLUMINA15	3	//J - Illumina 1.5+ Phred+64,  raw reads typically (3, 40)    with 0=unused, 1=unused, 2=Read Segment Quality Control Indicator (bold)
+#define xILLUMINA18	4	//L - Illumina 1.8+ Phred+33,  raw reads typically (0, 41)
+#define xINT 		5	//Phred+33
+#define xINTSOLEXA 	6	//SOLEXA int
+*/
+
+
+#define xPHRED33	1
+#define xPHRED64	2
+#define xSOLEXA 	3
+
+
+
+
+
+
+int phred33char_as_prob(char c)
+{
+	printf("char %c is %d ", c, (int)c);
+	/// Translate a Phred-encoded ASCII character into a Phred quality
+	return ((int)c >= 33 ? ((int)c - 33) : 0);
+}
+
+
+
+/*
+* Lookup table for converting from Solexa-scaled (log-odds) quality
+* values to Phred-scaled quality values.
+*/
+char solToPhred[] = {
+/* -10 */ 0, 1, 1, 1, 1, 1, 1, 2, 2, 3,
+/* 0 */ 3, 4, 4, 5, 5, 6, 7, 8, 9, 10,
+/* 10 */ 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+/* 20 */ 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+/* 30 */ 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+/* 40 */ 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
+/* 50 */ 50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
+/* 60 */ 60, 61, 62, 63, 64, 65, 66, 67, 68, 69,
+/* 70 */ 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+/* 80 */ 80, 81, 82, 83, 84, 85, 86, 87, 88, 89,
+/* 90 */ 90, 91, 92, 93, 94, 95, 96, 97, 98, 99,
+/* 100 */ 100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
+/* 110 */ 110, 111, 112, 113, 114, 115, 116, 117, 118, 119,
+/* 120 */ 120, 121, 122, 123, 124, 125, 126, 127, 128, 129,
+/* 130 */ 130, 131, 132, 133, 134, 135, 136, 137, 138, 139,
+/* 140 */ 140, 141, 142, 143, 144, 145, 146, 147, 148, 149,
+/* 150 */ 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+/* 160 */ 160, 161, 162, 163, 164, 165, 166, 167, 168, 169,
+/* 170 */ 170, 171, 172, 173, 174, 175, 176, 177, 178, 179,
+/* 180 */ 180, 181, 182, 183, 184, 185, 186, 187, 188, 189,
+/* 190 */ 190, 191, 192, 193, 194, 195, 196, 197, 198, 199,
+/* 200 */ 200, 201, 202, 203, 204, 205, 206, 207, 208, 209,
+/* 210 */ 210, 211, 212, 213, 214, 215, 216, 217, 218, 219,
+/* 220 */ 220, 221, 222, 223, 224, 225, 226, 227, 228, 229,
+/* 230 */ 230, 231, 232, 233, 234, 235, 236, 237, 238, 239,
+/* 240 */ 240, 241, 242, 243, 244, 245, 246, 247, 248, 249,
+/* 250 */ 250, 251, 252, 253, 254, 255
 };
 
-static const int quality_constants[4][3] = {
-  /* offset, min, max
-   *
- S - Sanger        Phred+33,  raw reads typically (0, 40)
- X - Solexa        Solexa+64, raw reads typically (-5, 40)
- I - Illumina 1.3+ Phred+64,  raw reads typically (0, 40)
- J - Illumina 1.5+ Phred+64,  raw reads typically (3, 40)
-     with 0=unused, 1=unused, 2=Read Segment Quality Control Indicator (bold)
-     (Note: See discussion above).
- L - Illumina 1.8+ Phred+33,  raw reads typically (0, 41)
- */
 
 
-
-  {0, 4, 60}, /* PHRED */
-  {33, 33, 126}, /* SANGER */
-  {64, 58, 112}, /* SOLEXA; this is an approx; the transform is non-linear */
-  {64, 64, 110} /* ILLUMINA */
-};
-
-
-
-void trim_read(pedata *readpair, int qualtype)
+int solexaToPhred(int sol)
 {
 	/*
-	 * do quality-based read trimming
-	 *
-	 *
-	 *TODO to be implemented.
-	 *
-	 *
-	 * adopted from sickle
-	 * sickle says:
-     Return the adjusted quality, depending on quality type.
-
-     Note that this uses the array in sickle.h, which *approximates*
-     the SOLEXA (pre-1.3 pipeline) qualities as linear. This is
-     inaccurate with low-quality bases.
-	 */
-
-	#define Q_OFFSET 0
-	#define Q_MIN 1
-	#define Q_MAX 2
-
-	puts("trimming");
-    printf(": %s", readpair->readID1);
-    printf(": %s", readpair->read1);
-    printf(": %s", readpair->phred1);
-
-	int pos;
-	int qualvalue;
-
-	int * quallist = (int*)malloc(sizeof(int)*strlen(readpair->phred1)) ;
-
-	char qualchar;
-	for (pos=0; pos<strlen(readpair->phred1); pos++)
+	* Convert a Solexa-scaled quality value into a Phred-scale quality value.
+	*
+	* p = probability that base is miscalled
+	* Qphred = -10 * log10 (p)
+	* Qsolexa = -10 * log10 (p / (1 - p))
+	*/
+	if (sol>256)
 	{
-		qualchar=readpair->phred1[pos];
-		qualvalue = (int) qualchar;
-		printf("%c\t%d\n", qualchar, qualvalue);
+		fprintf (stderr, "%d is not a Solexa score.", sol);
+		return 0;
 
-		if (qualvalue < quality_constants[qualtype][Q_MIN] || qualvalue > quality_constants[qualtype][Q_MAX]) {
+	}
+	if(sol < -10) return 0;
+	return solToPhred[sol+10];
+}
+
+
+
+
+
+
+char charToPhred33(char c, int qualtype)
+{
+	/**
+	 * Take an ASCII-encoded quality value and convert it to a Phred33
+	 * ASCII char.
+	 *
+	 *
+	 *
+	 * TODO a looped wrapper should be used for error checking while reading data
+		if (charToPhred33<0)
+		{
 			fprintf (stderr, "ERROR: Quality value (%d) does not fall within correct range for %s encoding.\n", qualvalue, typenames[qualtype]);
-			fprintf (stderr, "Range for %s encoding: %d-%d\n", typenames[qualtype], quality_constants[qualtype][Q_MIN], quality_constants[qualtype][Q_MAX]);
 			fprintf (stderr, "Read ID: %s\n", readpair->readID1);
 			fprintf (stderr, "FastQ record: %s\n", readpair->read1);
 			fprintf (stderr, "Quality string: %s\n", readpair->phred1);
 			fprintf (stderr, "Quality char: '%c'\n", qualchar);
 			fprintf (stderr, "Quality position: %d\n", pos+1);
-			exit(1);
 		  }
-		qualvalue -= quality_constants[qualtype][Q_OFFSET];
+	*/
 
 
-		quallist[pos]=qualvalue;
+	if(c == ' ')
+	{
+		fprintf (stderr, "Found a space character but expected an ASCII-encoded quality values. Your quality values might be provided as integers, which is currently not supported.\n");
+		return -1;
+	}
+
+	char phred33char;
+
+	//printf(">>> %c", c);
+
+	switch (qualtype)
+	{
+		case xPHRED33:
+			if ((c < (int)'!') || (c > (int)'I'))
+			{
+				fprintf (stderr, "ASCII character %c is out of range for PHRED33." , c);
+				return -1;
+			}
+			phred33char=c;
+			// keep phred quality
+			break;
+		case xPHRED64:
+			if ((c < (int)'@') || (c > (int)'h'))
+			{
+				fprintf (stderr, "ASCII character %c is out of range for PHRED64." , c);
+				return -1;
+			}
+			// Convert to 33-based phred
+			phred33char= c -(64-33);
+			break;
+		case xSOLEXA:
+			if ((c < (int)';') || (c > (int)'h'))
+			{
+				fprintf (stderr, "ASCII character %c is out of range for Solexa." , c);
+				return -1;
+			}
+			phred33char= solexaToPhred((int)c - 64) + 33;
+
+			break;
+		default:
+			fprintf (stderr, "This shouln't happen.");
+			return -1;
+	}
+
+	if ((phred33char<33) || (phred33char>104))
+	{
+		fprintf (stderr, "Got ASCII character %d which is out of range." , (int)c);
+		return -1;
+	}
+
+	return phred33char;
+}
+
+
+void test_quality_strings()
+{
+	char * SANGER= "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHI";
+	char * SOLEXA= ";<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefgh";
+	char * ILLUMINA15= "BCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefgh";
+
+	int pos;
+	for (pos=0; pos<strlen(SANGER); pos++)
+	{
+		printf("%c",  charToPhred33(SANGER[pos], xPHRED33));
+	}
+	printf("\n");
+	for (pos=0; pos<strlen(SOLEXA); pos++)
+	{
+		printf("%c",  charToPhred33(SOLEXA[pos], xSOLEXA));
+	}
+	printf("\n");
+	for (pos=0; pos<strlen(ILLUMINA15); pos++)
+	{
+		printf("%c",  charToPhred33(ILLUMINA15[pos], xPHRED64));
+	}
+	printf("\n");
+
+	return;
+
+}
+
+
+
+
+
+float calc_avgqual(char * phred, int qualtype)
+{
+	/*
+	 * sum-up phred score, normalize to seq len
+	 */
+	int qualvalue=0;
+	int pos;
+	for (pos=0; pos<(int)strlen(phred); pos++)
+	{
+		qualvalue += (int)phred[pos];
+	}
+	return (qualvalue/(float)strlen(phred));
+}
+
+
+
+void trim_read(char * read, char * phred, int minqual, int qualtype)
+{
+	/*
+	 * do quality-based read trimming based on max-coverage window
+	 */
+	int pos;
+	int qualvalue;
+
+	int longeststart=0;
+	int longestend=0;
+
+	int tmplongeststart=0;
+	int tmplongestend=0;
+
+
+	//determine longest continuous section
+	char qualchar;
+	for (pos=0; pos<strlen(phred); pos++)
+	{
+		qualchar=phred[pos];
+		qualvalue = (int) qualchar;
+
+		//printf("%d\t%c %d\t%d", pos, qualchar, qualvalue, minqual);
+		if (qualvalue>=minqual)
+		{
+			tmplongestend=pos;
+
+			if ((tmplongestend-tmplongeststart) >(longestend-longeststart))
+			{
+				longeststart=tmplongeststart;
+				longestend=tmplongestend;
+			}
+		}
+		else
+		{
+			tmplongeststart=pos;
+			tmplongestend=pos;
+		}
+		//printf("\t[%d:%d]\n", longeststart, longestend);
 	}
 
 
+	if (longestend<strlen(phred))
+	{
+		//TODO woher kommt dieser offset? - speichere ich einen zyklus zu spät?
+		trim_end(read, phred, longestend+1);
+	}
+	if (longeststart>0)
+	{
+		//TODO woher kommt dieser offset? - speichere ich einen zyklus zu spät?
+		trim_start(read, phred, longeststart+1);
+	}
 
+	//printf("trimming to [%d:%d] %d\n", longeststart, longestend, longestend-longeststart);
+	//printf("y %s\ny %s\n", read, phred);
 
 	return;
 }
@@ -457,6 +725,24 @@ void trim_read(pedata *readpair, int qualtype)
 
 int main(int argc, const char** argv)
 {
+
+
+
+/*
+	char d = charToPhred33('J', xPHRED33);
+	printf("%c\t%f", d, phred33char_as_prob(d));
+
+
+	//test_quality_strings();
+
+	return 0;
+
+*/
+
+
+	if (0)
+	{
+
 
     //TODO ENABLE WHEN DONE
     if (0) {
@@ -507,15 +793,35 @@ int main(int argc, const char** argv)
     }
     }
 
+	}
 
 
 
+
+//TODO set and check parameter to be conflict-free
     unsigned short number_of_threads=5;
+
+
+    int qualtype = xPHRED33;
+    int trimmingminqual = 70; //(int)'A';
+    int trimstart=0;	//remove k leading chars before trimming
+    int trimend=0;	//remove k trailing chars before trimming
+    int cropstart=0;	//trim head of sequences to specified length
+    int cropend=0;	//trim 3'ends of sequences to specified length
+    int minlen=0;	//discard reads with len < k
+    int avgqual=0;	//discard reads with avgqual < k
+
+
+
+
+
 
     srand(time(NULL));
 
 
 
+    if (0)
+    {
 
 	pthread_t r1, r2, r3, r4, w1;
 	rwargs *a1, *a2, *a3, *a4, *a5;
@@ -557,13 +863,7 @@ int main(int argc, const char** argv)
 
 
 	return 0;
-
-
-
-
-
-
-
+	}
 
 
 
@@ -591,6 +891,10 @@ int main(int argc, const char** argv)
         printf("File failed to open: %s\n", fn2);
         exit(EXIT_FAILURE);
       }
+
+
+
+
 
 
 
@@ -639,27 +943,119 @@ int main(int argc, const char** argv)
     FILE *fn1p = fopen(fn1, "r");
     FILE *fn2p = fopen(fn2, "r");
 
-    pedata ** c2=NULL;
-    c2 = get_next_reads_to_process(fn1p,fn2p, 3);
-    puts("::::::::::::::::::");
-    c2 = get_next_reads_to_process(fn1p,fn2p, 20);
+    pedata ** readlist=NULL;
+    //c2 = get_next_reads_to_process(fn1p,fn2p, 3);
+    //puts("::::::::::::::::::");
+    readlist = get_next_reads_to_process(fn1p,fn2p, 20);
 
 
 
 
-    int qualtype = 3; //assuming illumina
+
+    int PE=0;		//do we have PE data?
 
 
-    int a22;
-    for (a22 = 0; a22 < 4; a22++)
+    int readentrycnt;
+    for (readentrycnt = 0; readentrycnt < 4; readentrycnt++)
     {
         //int thread_no;
         //char [MAXREADLEN];
-    	printf(">>%i\n", a22);
-        printf("%s", c2[a22]->readID1);
+    	printf(">>%i\n", readentrycnt);
+        printf("%s\n", readlist[readentrycnt]->readID1);
+        printf("%s\n", readlist[readentrycnt]->readID2);
 
 
-        trim_read(c2[a22], qualtype);
+
+        printf("1l %s\n", readlist[readentrycnt]->read1);
+    	printf("1l %s\n", readlist[readentrycnt]->read2);
+
+
+        if (trimstart>0)
+        {
+        	trim_start(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1, trimstart);
+            if (PE)
+            {
+                trim_start(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2, trimstart);
+            }
+        }
+        if (trimend>0)
+        {
+            trim_end(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1, trimend);
+            if (PE)
+            {
+            	trim_end(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2, trimend);
+            }
+        }
+        if (cropstart>0)
+        {
+            crop_start(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1, cropstart);
+            if (PE)
+            {
+            	crop_start(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2, cropstart);
+            }
+        }
+        if (cropend>0)
+        {
+            crop_end(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1, cropend);
+            if (PE)
+            {
+            	crop_end(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2, cropend);
+            }
+        }
+
+
+
+
+        if (trimmingminqual>0)
+        {
+			trim_read(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1,
+					trimmingminqual, 	//cut-off value for dynamic trimming
+					qualtype	//phred33/64/solexa
+			);
+			if (PE)
+			{
+				trim_read(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2,
+						trimmingminqual, 	//cut-off value for dynamic trimming
+						qualtype	//phred33/64/solexa
+				);
+			}
+        }
+
+
+
+        if (minlen>0)
+        {
+        	if (strlen(readlist[readentrycnt]->read1)<minlen)
+        	{
+        		printf("read mate1 too short\n");
+        	}
+        	if (PE && strlen(readlist[readentrycnt]->read2)<minlen)
+        	{
+        		printf("read mate2 too short\n");
+        	}
+        }
+
+        avgqual=70;
+        if (avgqual>0)
+        {
+        	//TODO ensure that avgqual-scoring matches qualtype
+        	if (calc_avgqual(readlist[readentrycnt]->phred1, qualtype)<avgqual)
+        	{
+        		printf("read mate1 has too low quality\n");
+        	}
+        	if (calc_avgqual(readlist[readentrycnt]->phred2, qualtype)<avgqual)
+        	{
+        		printf("read mate2 has too low quality\n");
+        	}
+        }
+
+
+        printf("1 %s\n", readlist[readentrycnt]->read1);
+        printf("2 %s\n", readlist[readentrycnt]->phred1);
+    	//printf("2l %s\n", readlist[readentrycnt]->read2);
+    	//printf("2l %s\n", readlist[readentrycnt]->phred2);
+
+
     }
 
 
@@ -672,11 +1068,6 @@ int main(int argc, const char** argv)
     return EXIT_SUCCESS;
 
 }
-
-
-
-
-
 
 
 
