@@ -147,6 +147,34 @@ void remove_newline(char * line)
 
 
 
+char* reverse_complement(char* seq)
+{
+	/*
+	 *
+	 * non-inplace version of reverse complement
+	 *
+	 */
+	char * rc = (char*)malloc(sizeof(char)*strlen(seq));
+	int i,j;
+	j=0;
+	for(i=(int)strlen(seq)-1; i>=0; --i)
+	{
+		switch(seq[i])
+		{
+			case 'A': rc[j++]='T'; break;
+			case 'C': rc[j++]='G';break;
+			case 'G': rc[j++]='C';break;
+			case 'T': rc[j++]='A';break;
+			//todo errorhandling
+			default: return NULL;
+		}
+	}
+	return rc;
+}
+
+
+
+
 
 void trim_start(char * line1, char * line2, int rem)
 {
@@ -402,7 +430,7 @@ pedata** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
 
 
 
-void trim_to_longest_valid_section(char * read, char * phred)
+void trim_to_longest_valid_section(char* read, char* phred)
 {
 	/*
 	 * find longest stretch of [ATCG]
@@ -447,7 +475,10 @@ void trim_to_longest_valid_section(char * read, char * phred)
 	if (longestend<strlen(read))
 	{
 		//TODO woher kommt dieser offset? - speichere ich einen zyklus zu spät?
-		trim_end(read, phred, longestend+1);
+
+		//todo error here.
+
+		//trim_end(read, phred, longestend+1);
 	}
 	if (longeststart>0)
 	{
@@ -747,7 +778,29 @@ void trim_read(char * read, char * phred, int minqual, int qualtype)
 
 
 
+char** detect_adapters(sedata** randomreads)
+{
+	/*
+	 *
+	 *
+	 *
+	 */
 
+
+	int i=0;
+	while(NULL!=randomreads[i])
+	{
+		printf(">adapter_%d\n%s\n", i, randomreads[i]->read1);
+		//todo: tree.
+		++i;
+	}
+
+
+	//todo MAXADAPTERNUM - get proper length
+	char** adapters = (char**)calloc(MAXADAPTERNUM, sizeof(char*));
+	return adapters;
+
+}
 
 
 
@@ -862,51 +915,32 @@ int blast_adapters(char** adapters)
 
 
 
+
+
+
+
 int main(int argc, const char** argv)
 {
 
-
-	//when file with adapter sequences is supplied...
-    char * adptfle="/home/thieme/eclipse-workspace/SandRA/adapters.fasta";
-
-    if (!file_exists(adptfle)) {
-        printf("File failed to open: %s\n", adptfle);
-        exit(EXIT_FAILURE);
-      }
-
-
-    FILE *adptflep = fopen(adptfle, "r");
-
-    char** adapters2;
-    adapters2=read_adapters_from_file(adptflep);
-
-	int i=0;
-	while(NULL!=adapters2[i])
-	{
-		printf("%d: %s\n", i, adapters2[i]);
-		++i;
-	}
-
-
-
-	//test for the blast procedure for auto-detected adapters
-	blast_adapters(adapters2);
+	char* c1 = "GTGCTAGCTGATGCTGCGTAGCTGCAGGGG";
+	char* q;
+	q=reverse_complement(c1);
+	printf("FW %s\n",c1);
+	printf("RC %s\n",q);
 
 	return 0;
 
 
-
-
-	//trim @N test case
-	char * c = "GTGCTAGCTGATGCTGCGTAGCTGCATCTG";
-	char * p = "123456789012345678901234567890";
+	//TEST: trim @N test case
+	char* c = "GTGCTAGCTGATGCTGCGTAGCTGCATCTG";
+	char* p = "123456789012345678901234567890";
 
     printf("%s\n", c);
     trim_to_longest_valid_section(c, p);
     printf("%s\n", c);
 
-	c = "GTGCNTAGCTGATGCTGCGTAGCTGCANTCTG";
-	p = "12345678901234567890123456789000";
+	c = "GTGCNTAGCTGATGCTGCGTAGCTGCANTCTNG";
+	p = "123456789012345678901234567890060";
 
     printf("------\n%s\n", c);
     trim_to_longest_valid_section(c, p);
@@ -917,16 +951,17 @@ int main(int argc, const char** argv)
 	return 0;
 
 
-/*
-	char d = charToPhred33('J', xPHRED33);
-	printf("%c\t%f", d, phred33char_as_prob(d));
 
+	//TEST: quality
+	char d = charToPhred33('J', xPHRED33);
+	printf("%c\t%d", d, phred33char_as_prob(d));
 
 	//test_quality_strings();
 
 	return 0;
 
-*/
+
+
 
 
 	if (0)
@@ -939,7 +974,7 @@ int main(int argc, const char** argv)
 
     /* get list of command line options and their arguments */
     optList = NULL;
-    optList = GetOptList(argc, argv, "a:bcd:ef?");
+    optList = GetOptList(argc, (char**)argv, "a:bcd:ef?");
 
 
     if (optList==NULL)
@@ -988,9 +1023,6 @@ int main(int argc, const char** argv)
 
 
 //TODO set and check parameter to be conflict-free
-    unsigned short number_of_threads=5;
-
-
     int qualtype = xPHRED33;
     int trimmingminqual = 70; //(int)'A';
     int trimstart=0;	//remove k leading chars before trimming
@@ -1000,22 +1032,26 @@ int main(int argc, const char** argv)
     int minlen=0;	//discard reads with len < k
     int avgqual=0;	//discard reads with avgqual < k
 
+    char* adptfle=NULL; //"/home/thieme/eclipse-workspace/SandRA/adapters.fasta";
 
     int n_splitting=1; //get longest valid [ATCG] stretch of read
-
-
-
-
-    //todo: read_adapters_from_file()
-
-
-
-
-
 
     srand(time(NULL));
 
 
+
+
+
+	//read adaters from file when file is given...
+    if (NULL!=adptfle && !file_exists(adptfle))
+    {
+        printf("File failed to open: %s\n", adptfle);
+        exit(EXIT_FAILURE);
+    }
+
+    FILE *adptflep = fopen(adptfle, "r");
+    char** useradapters;
+    useradapters=read_adapters_from_file(adptflep);
 
 
 
@@ -1026,16 +1062,7 @@ int main(int argc, const char** argv)
       //char *fn1 = argv[1];
     char * fn1="/home/thieme/eclipse-workspace/SandRA/test.fastq";
     char * fn2="/home/thieme/eclipse-workspace/SandRA/test.fastq";
-/*
-      char *fn2 = argv[2];
-      char *fo1 = argv[3];
-      char *fo2 = argv[4];
 
-      FILE *fp1 = fopen(fn1, "r");
-      FILE *fp2 = fopen(fn2, "r");
-      FILE *fpo1 = fopen(fo1, "w");
-      FILE *fpo2 = fopen(fo2, "w");
-*/
     if (!file_exists(fn1)) {
         printf("File failed to open: %s\n", fn1);
         exit(EXIT_FAILURE);
@@ -1044,11 +1071,6 @@ int main(int argc, const char** argv)
         printf("File failed to open: %s\n", fn2);
         exit(EXIT_FAILURE);
       }
-
-
-
-
-
 
 
 
@@ -1065,8 +1087,8 @@ int main(int argc, const char** argv)
 
     FILE *fnrnd = fopen(fn1, "r");
 
-    sedata ** c=NULL;
-    c = get_random_entry(fnrnd, 5);
+    sedata ** randomentries=NULL;
+    randomentries = get_random_entry(fnrnd, 5);
 
     int a2;
     for (a2 = 0; a2 < 4; a2++)
@@ -1074,9 +1096,9 @@ int main(int argc, const char** argv)
         //int thread_no;
         //char [MAXREADLEN];
     	printf(">>%i\n", a2);
-        printf(": %s", c[a2]->readID1);
-        printf(": %s", c[a2]->read1);
-        printf(": %s", c[a2]->phred1);
+        printf(": %s", randomentries[a2]->readID1);
+        printf(": %s", randomentries[a2]->read1);
+        printf(": %s", randomentries[a2]->phred1);
     }
 
     fclose(fnrnd);
@@ -1084,7 +1106,28 @@ int main(int argc, const char** argv)
 
 
 
-    return EXIT_SUCCESS;
+    //todo: to be implemented
+    char** detectedadapters;
+    detectedadapters=detect_adapters(randomentries);
+
+
+
+	//test for the blast procedure for auto-detected adapters
+	blast_adapters(detectedadapters);
+
+
+	//todo merge adapter listes
+	//detectedadapters + useradapters
+	int i=0;
+	while(NULL!=useradapters[i])
+	{
+		printf("%d: %s\n", i, useradapters[i]);
+		++i;
+	}
+
+
+	printf("done");
+
     }
 
 
