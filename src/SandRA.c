@@ -216,7 +216,30 @@ char* reverse_complement(char* seq)
 
 
 
+#if 1
+void trim_start(char ** cp1, char ** cp2, int n)
+{
+  /*
+   * Clips n characters from 5'-end.
+   */
+  int len = (int)strlen(*cp1);
+  *cp1 += MIN(MAX(0, n), len - 1); // correct offset?
+  *cp2 += MIN(MAX(0, n), len - 1); // correct offset?
+  return ;
+}
 
+void trim_end(char ** cp1, char ** cp2, int n)
+{
+  /* 
+   * Sets read length to n.
+   */
+  int len = (int)strlen(*cp1);
+  *(*cp1 + MIN(MAX(0, n), len)) = 0;
+  *(*cp2 + MIN(MAX(0, n), len)) = 0;
+  return ;
+}
+
+#else
 void trim_start(char* line1, char* line2, int rem)
 {
 	/*
@@ -248,7 +271,7 @@ void trim_end(char* line1, char* line2, int rem)
 	line2[MIN(MAX(0,rem),len)] = 0;
 	return ;
 }
-
+#endif
 
 
 void crop_start(char * line1, char * line2, int rem)
@@ -535,12 +558,12 @@ void trim_to_longest_valid_section(char* read, char* phred)
 
 		//todo error here.
 
-		//trim_end(read, phred, longestend+1);
+		//trim_end(&read, phred, longestend+1);
 	}
 	if (longeststart>0)
 	{
 		//TODO woher kommt dieser offset? - speichere ich einen zyklus zu spät?
-		trim_start(read, phred, longeststart+1);
+		trim_start(&read, &phred, longeststart+1);
 	}
 
 	printf("N: %s\ny %s\n", read, phred);
@@ -808,12 +831,12 @@ void trim_read(char * read, char * phred, int minqual, int qualtype)
 	if (longestend<strlen(phred))
 	{
 		//TODO woher kommt dieser offset? - speichere ich einen zyklus zu spät?
-		trim_end(read, phred, longestend+1);
+		trim_end(&read, phred, longestend+1);
 	}
 	if (longeststart>0)
 	{
 		//TODO woher kommt dieser offset? - speichere ich einen zyklus zu spät?
-		trim_start(read, phred, longeststart+1);
+		trim_start(&read, &phred, longeststart+1);
 	}
 
 	//printf("trimming to [%d:%d] %d\n", longeststart, longestend, longestend-longeststart);
@@ -1011,18 +1034,18 @@ void* worker(int id)
 
 	        if (trimend>0) //needs to go first, otherwise trimstart will change sequence length
 	        {
-	            trim_end(readlist[readentrypos]->read1, readlist[readentrypos]->phred1, trimend);
+	            trim_end(&readlist[readentrypos]->read1, readlist[readentrypos]->phred1, trimend);
 	            if (PE)
 	            {
-	            	trim_end(readlist[readentrypos]->read2, readlist[readentrypos]->phred2, trimend);
+	            	trim_end(&readlist[readentrypos]->read2, readlist[readentrypos]->phred2, trimend);
 	            }
 	        }
 	        if (trimstart>0)
 	        {
-	        	trim_start(readlist[readentrypos]->read1, readlist[readentrypos]->phred1, trimstart);
+	        	trim_start(&readlist[readentrypos]->read1, &readlist[readentrypos]->phred1, trimstart);
 	            if (PE)
 	            {
-	                trim_start(readlist[readentrypos]->read2, readlist[readentrypos]->phred2, trimstart);
+	                trim_start(&readlist[readentrypos]->read2, &readlist[readentrypos]->phred2, trimstart);
 	            }
 	        }
 	        if (cropstart>0)
