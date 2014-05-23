@@ -217,7 +217,6 @@ char* reverse_complement(char* seq)
 
 
 
-
 void trim_start(char* line1, char* line2, int rem)
 {
 	/*

@@ -88,7 +88,7 @@ int MatchOpt(const char argument, char *const options);
 *                          an argument.
 *   Effects    : Creates a link list of command line options and their
 *                arguments.
-*   Returned   : option_t type value where the option and arguement fields
+*   Returned   : option_t type value where the option and argument fields
 *                contain the next option symbol and its argument (if any).
 *                The argument field will be set to NULL if the option is
 *                specified as having no arguments or no arguments are found.
@@ -98,7 +98,7 @@ int MatchOpt(const char argument, char *const options);
 *   NOTE: The caller is responsible for freeing up the option list when it
 *         is no longer needed.
 ****************************************************************************/
-option_t *GetOptList(const int argc, char *const argv[], char *const options)
+option_t *GetOptList(const int argc, char **const argv, char *const options)
 {
     int nextArg;
     option_t *head, *tail;
@@ -135,7 +135,7 @@ option_t *GetOptList(const int argc, char *const argv[], char *const options)
 
                 if (':' == options[optIndex + 1])
                 {
-                    /* the option found should have a text arguement */
+                    /* the option found should have a text argument */
                     argIndex++;
 
                     if (strlen(argv[nextArg]) > argIndex)
@@ -168,10 +168,10 @@ option_t *GetOptList(const int argc, char *const argv[], char *const options)
 /****************************************************************************
 *   Function   : MakeOpt
 *   Description: This function uses malloc to allocate space for an option_t
-*                type structure and initailizes the structure with the
+*                type structure and initializes the structure with the
 *                values passed as a parameter.
 *   Parameters : option - this option character
-*                argument - pointer string containg the argument for option.
+*                argument - pointer string containing the argument for option.
 *                           Use NULL for no argument
 *                index - argv[index] contains argument us OL_NOINDEX for
 *                        no argument
@@ -229,10 +229,10 @@ void FreeOptList(option_t *list)
 
 /****************************************************************************
 *   Function   : MatchOpt
-*   Description: This function searches for an arguement in an option list.
+*   Description: This function searches for an argument in an option list.
 *                It will return the index to the option matching the
-*                arguement or the index to the NULL if none is found.
-*   Parameters : arguement - character arguement to be matched to an
+*                argument or the index to the NULL if none is found.
+*   Parameters : argument - character argument to be matched to an
 *                            option in the option list
 *                options - getopt style option list.  A NULL terminated
 *                          string of single character options.  Follow an
@@ -240,7 +240,7 @@ void FreeOptList(option_t *list)
 *                          an argument.
 *   Effects    : None
 *   Returned   : Index of argument in option list.  Index of end of string
-*                if arguement does not appear in the option list.
+*                if argument does not appear in the option list.
 ****************************************************************************/
 int MatchOpt(const char argument, char *const options)
 {
