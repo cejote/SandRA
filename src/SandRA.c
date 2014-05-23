@@ -34,20 +34,58 @@
 
 
 // defines
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
+
+#define MAXREADLEN 500
+#define MAXADAPTERNUM 500
+
+#define MAXCOUNT 15
 
 #define MAXREADLEN 500
 
-#define MAXCOUNT 5
+#define INREADCOUNT	3
 
-#define MAXADAPTERNUM 500
+#define xPHRED33	1
+#define xPHRED64	2
+#define xSOLEXA 	3
 
 
-#define MIN(a,b) (((a)<(b))?(a):(b))
-#define MAX(a,b) (((a)>(b))?(a):(b))
+
+int THREADCOUNT =10;
+int READBLOCKSIZE = 11;
+
+
+int reads_processed = 0;
+
+
+//pthread_cond_t items = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t readfilelock = PTHREAD_MUTEX_INITIALIZER;
+
+
+
+
+	FILE *infpR1;
+	FILE *infpR2;
+	FILE *outfpR1;
+	FILE *outfpR2;
+
+
 
 
 
 // structs
+
+	/*
+typedef struct {
+	int id;
+	FILE *infpR1;
+	FILE *infpR2;
+	FILE *outfpR1;
+	FILE *outfpR2;
+} threaddata;
+	*/
+
 
 typedef struct pe_data
 {
@@ -69,19 +107,6 @@ typedef struct pe_data
 
 
 
-typedef struct se_data
-{
-/*
- * struct to hold read data to be passed to the threads
- */
-    //int thread_no;
-    char readID1[MAXREADLEN];
-    char read1[MAXREADLEN];
-    char phred1[MAXREADLEN];
-} sedata;
-
-
-
 
 
 
@@ -90,6 +115,23 @@ typedef struct se_data
 
 
 
+
+
+// global variables
+//TODO set and check parameter to be conflict-free
+    int qualtype = xPHRED33;
+    int trimmingminqual = 70; //(int)'A';
+    int trimstart=0;	//remove k leading chars before trimming
+    int trimend=0;	//remove k trailing chars before trimming
+    int cropstart=0;	//trim head of sequences to specified length
+    int cropend=0;	//trim 3'ends of sequences to specified length
+    int minlen=0;	//discard reads with len < k
+    int avgqual=0;	//discard reads with avgqual < k
+    int n_splitting=1; //get longest valid [ATCG] stretch of read
+
+    int PE=0;		//do we have PE data?
+
+    char** useradapters=NULL; // get list of known adapters
 
 
 
@@ -176,22 +218,32 @@ char* reverse_complement(char* seq)
 
 
 
-void trim_start(char * line1, char * line2, int rem)
+void trim_start(char* line1, char* line2, int rem)
 {
 	/*
 	 * set read len to particular value
 	 */
+
+	printf("ts\n");
+
+	printf("%s\t%s\n", line1, line1+20);
+	line1+=20;
+	printf("%s\n", line1);
+
+
 	int len = (int)strlen(line1);
     //TODO :how can this be done inplace?!
-	sprintf(line1, line1+MIN(MAX(0,rem),len));
-	sprintf(line2, line2+MIN(MAX(0,rem),len));
+	//sprintf(line1, line1+MIN(MAX(0,rem),len));
+	//sprintf(line2, line2+MIN(MAX(0,rem),len));
 	return;
 }
-void trim_end(char * line1, char * line2, int rem)
+void trim_end(char* line1, char* line2, int rem)
 {
 	/*
 	 * set read len to rem
 	 */
+	printf("te\n");
+
 	int len = (int)strlen(line1);
 	line1[MIN(MAX(0,rem),len)] = 0;
 	line2[MIN(MAX(0,rem),len)] = 0;
@@ -206,6 +258,9 @@ void crop_start(char * line1, char * line2, int rem)
 	 * remove rem-many leading chars
 	 * move start to pos rem
 	 */
+	printf("cs\n");
+
+
 	int len = (int)strlen(line1);
     //TODO :how can this be done inplace?!
 	sprintf(line1, line1+MIN(MAX(0,rem),len));
@@ -217,6 +272,8 @@ void crop_end(char * line1, char * line2, int rem)
 	/*
 	 * remove rem-many trailing chars
 	 */
+	printf("ce\n");
+
 	int len = (int)strlen(line1);
 	line1[MIN(MAX(0,len-rem),len)] = 0;
 	line2[MIN(MAX(0,len-rem),len)] = 0;
@@ -257,7 +314,7 @@ int valid_characters(char * line)
 
 
 
-sedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
+pedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
 {
 	/*
 	 *
@@ -285,7 +342,7 @@ sedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
 
 
 
-	sedata** struclist = (sedata**)malloc(sizeof(sedata*) * N);
+	pedata** struclist = (pedata**)malloc(sizeof(pedata*) * N);
 	char currline[MAXREADLEN];
 
 
@@ -311,7 +368,7 @@ sedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
 
                     if ('@'==currline[0])
                     {
-                		sedata *data1=(sedata*)malloc(sizeof(sedata));
+                		pedata *data1=(pedata*)malloc(sizeof(pedata));
 
                 		strcpy(data1->readID1, currline);
                 		if (NULL == fgets(data1->read1, MAXREADLEN-1, fp)){break;}
@@ -351,14 +408,7 @@ sedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
 
 
 
-
-
-
-
-
-
-
-pedata** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
+pedata** get_next_reads_to_process(unsigned int N)
 /*
  *
  * returns struct of next N-many reads fetched from files
@@ -375,22 +425,28 @@ pedata** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
  */
 {
 
-	pedata** struclist = (pedata**)malloc(sizeof(pedata*) * N);
+	pedata** struclist = (pedata**)calloc(N, sizeof(pedata*));
 
-    char tmpline[MAXREADLEN];
 
+
+	printf("WAIT\n");
+	pthread_mutex_lock(&readfilelock);
+	//pthread_cond_wait(&slots, &slot_lock);
+	printf("START\n");
+
+	char tmpline[MAXREADLEN];
     int i;
 	for  (i=0; i<N; i++)
 	{
 		pedata *data1=(pedata*)malloc(sizeof(pedata));
-		if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;}
+		if (NULL == fgets(tmpline, MAXREADLEN-1, infpR1)){break;}
 		remove_newline(tmpline);
 		strcpy(data1->readID1, tmpline);
-		if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;}
+		if (NULL == fgets(tmpline, MAXREADLEN-1, infpR1)){break;}
 		remove_newline(tmpline);
 		strcpy(data1->read1, tmpline);
-		if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;} // skip the + line
-		if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;}
+		if (NULL == fgets(tmpline, MAXREADLEN-1, infpR1)){break;} // skip the + line
+		if (NULL == fgets(tmpline, MAXREADLEN-1, infpR1)){break;}
 		remove_newline(tmpline);
 		strcpy(data1->phred1, tmpline);
 
@@ -398,16 +454,16 @@ pedata** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
 		//charToPhred33
 
 
-		if (fpR2!=NULL)
+		if (infpR2!=NULL)
 		{
-			if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;}
+			if (NULL == fgets(tmpline, MAXREADLEN-1, infpR2)){break;}
 			remove_newline(tmpline);
 			strcpy(data1->readID2, tmpline);
-			if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;}
+			if (NULL == fgets(tmpline, MAXREADLEN-1, infpR2)){break;}
 			remove_newline(tmpline);
 			strcpy(data1->read2, tmpline);
-			if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;} // skip the + line
-			if (NULL == fgets(tmpline, MAXREADLEN-1, fpR1)){break;}
+			if (NULL == fgets(tmpline, MAXREADLEN-1, infpR2)){break;} // skip the + line
+			if (NULL == fgets(tmpline, MAXREADLEN-1, infpR2)){break;}
 			remove_newline(tmpline);
 
 			//TODO insert phred conversion
@@ -417,11 +473,13 @@ pedata** get_next_reads_to_process(FILE *fpR1, FILE *fpR2, unsigned int N)
 			strcpy(data1->phred2, tmpline);
 		}
 
-        data1->processed=0;
-		data1->thread_no = N;
+        //data1->processed=0;
+		//data1->thread_no = N;
 
 		struclist[i]=data1;
 	}
+	printf("unlocking & exit\n");
+	pthread_mutex_unlock(&readfilelock);
 
 	return struclist;
 }
@@ -509,9 +567,6 @@ void trim_to_longest_valid_section(char* read, char* phred)
 */
 
 
-#define xPHRED33	1
-#define xPHRED64	2
-#define xSOLEXA 	3
 
 
 
@@ -778,7 +833,7 @@ void trim_read(char * read, char * phred, int minqual, int qualtype)
 
 
 
-char** detect_adapters(sedata** randomreads)
+char** detect_adapters(pedata** randomreads)
 {
 	/*
 	 *
@@ -915,21 +970,224 @@ int blast_adapters(char** adapters)
 
 
 
+void* worker(int id)
+{
+	//threaddata *mydata = (threaddata *)tdata;
+	pedata ** readlist=NULL;
+
+	printf("started thread %d\n", id);
+
+	int readentrypos;
+	int running = 1;
+	while(running)
+	{
+		readlist = get_next_reads_to_process(READBLOCKSIZE);
+
+
+		readentrypos=0;
+		for (readentrypos=0; readentrypos<READBLOCKSIZE;readentrypos++)
+		{
+			//you just can't always get what you want
+			if (NULL==readlist[readentrypos])
+			{
+				printf("No more reads to process - exiting thread %d\n", id);
+				running =0;
+				break;
+			}
+			printf(" t %d read %d: %s\n", id, readentrypos, readlist[readentrypos]->readID1);
+
+
+
+	        //int thread_no;
+	        //char [MAXREADLEN];
+	    	//printf(">>%i\n", readentrypos);
+	        printf("davor1 %s\n", readlist[readentrypos]->readID1);
+	        //printf("%s\n", readlist[readentrypos]->readID2);
+
+
+
+	        printf("davor1 %s\n", readlist[readentrypos]->read1);
+	    	//printf("1l %s\n", readlist[readentrypos]->read2);
+
+
+	        if (trimend>0) //needs to go first, otherwise trimstart will change sequence length
+	        {
+	            trim_end(readlist[readentrypos]->read1, readlist[readentrypos]->phred1, trimend);
+	            if (PE)
+	            {
+	            	trim_end(readlist[readentrypos]->read2, readlist[readentrypos]->phred2, trimend);
+	            }
+	        }
+	        if (trimstart>0)
+	        {
+	        	trim_start(readlist[readentrypos]->read1, readlist[readentrypos]->phred1, trimstart);
+	            if (PE)
+	            {
+	                trim_start(readlist[readentrypos]->read2, readlist[readentrypos]->phred2, trimstart);
+	            }
+	        }
+	        if (cropstart>0)
+	        {
+	            crop_start(readlist[readentrypos]->read1, readlist[readentrypos]->phred1, cropstart);
+	            if (PE)
+	            {
+	            	crop_start(readlist[readentrypos]->read2, readlist[readentrypos]->phred2, cropstart);
+	            }
+	        }
+	        if (cropend>0)
+	        {
+	            crop_end(readlist[readentrypos]->read1, readlist[readentrypos]->phred1, cropend);
+	            if (PE)
+	            {
+	            	crop_end(readlist[readentrypos]->read2, readlist[readentrypos]->phred2, cropend);
+	            }
+	        }
+
+
+/*
+
+	        if (n_splitting>0)
+	        {
+	        	trim_to_longest_valid_section(readlist[readentrypos]->read1, readlist[readentrypos]->phred1);
+				if (PE)
+				{
+					trim_to_longest_valid_section(readlist[readentrypos]->read2, readlist[readentrypos]->phred2);
+				}
+	        }
 
 
 
 
-int main(int argc, const char** argv)
+
+	        if (trimmingminqual>0)
+	        {
+				trim_read(readlist[readentrypos]->read1, readlist[readentrypos]->phred1,
+						trimmingminqual, 	//cut-off value for dynamic trimming
+						qualtype	//phred33/64/solexa
+				);
+				if (PE)
+				{
+					trim_read(readlist[readentrypos]->read2, readlist[readentrypos]->phred2,
+							trimmingminqual, 	//cut-off value for dynamic trimming
+							qualtype	//phred33/64/solexa
+					);
+				}
+	        }
+
+
+
+	        if (minlen>0)
+	        {
+	        	if (strlen(readlist[readentrypos]->read1)<minlen)
+	        	{
+	        		printf("read mate1 too short\n");
+	        	}
+	        	if (PE && strlen(readlist[readentrypos]->read2)<minlen)
+	        	{
+	        		printf("read mate2 too short\n");
+	        	}
+	        }
+
+	        avgqual=70;
+	        if (avgqual>0)
+	        {
+	        	//TODO ensure that avgqual-scoring matches qualtype
+	        	if (calc_avgqual(readlist[readentrypos]->phred1, qualtype)<avgqual)
+	        	{
+	        		printf("read mate1 has too low quality\n");
+	        	}
+	        	if (calc_avgqual(readlist[readentrypos]->phred2, qualtype)<avgqual)
+	        	{
+	        		printf("read mate2 has too low quality\n");
+	        	}
+	        }
+*/
+
+	        printf("danach1 %s\n", readlist[readentrypos]->read1);
+	        printf("danach2 %s\n", readlist[readentrypos]->phred1);
+	    	//printf("2l %s\n", readlist[readentrypos]->read2);
+	    	//printf("2l %s\n", readlist[readentrypos]->phred2);
+
+
+
+
+
+
+
+
+			if (0==reads_processed%10 && reads_processed)
+			{
+				fprintf (stderr, "%d reads processed.\n", reads_processed);
+			}
+			++reads_processed;
+
+
+		}
+
+
+
+        //TODO write output to file
+		/*
+		readentrypos=0;
+		for (readentrypos=0; readentrypos<READBLOCKSIZE;readentrypos++)
+		{
+			;
+		}
+		 */
+
+
+
+		//printf("%d %d", readentrypos, READBLOCKSIZE);
+	}
+
+	printf("done thread %d\n", id);
+	return NULL;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+threaddata* init_thread_data (int i, FILE *infileR1, FILE *infileR2)
+{
+	/ *
+	 * init data object for each thread
+	 * /
+
+	threaddata *tdata;
+	tdata = (threaddata *)malloc (sizeof (threaddata));
+	if (tdata == NULL) return (NULL);
+
+	tdata->id = i;
+	tdata->infpR1=infileR1;
+	tdata->infpR2=infileR2;
+
+	return (tdata);
+}
+*/
+
+
+
+int functiontests()
 {
 
+	if (0){
+	//RC
 	char* c1 = "GTGCTAGCTGATGCTGCGTAGCTGCAGGGG";
 	char* q;
 	q=reverse_complement(c1);
 	printf("FW %s\n",c1);
 	printf("RC %s\n",q);
-
-	return 0;
-
+	}
 
 	//TEST: trim @N test case
 	char* c = "GTGCTAGCTGATGCTGCGTAGCTGCATCTG";
@@ -948,10 +1206,29 @@ int main(int argc, const char** argv)
 
 
 
+
 	return 0;
+}
 
 
 
+
+
+int main(int argc, const char** argv)
+{
+    srand(time(NULL));
+
+
+
+
+	//functiontests();
+	//return 0;
+
+
+
+
+
+	/*
 	//TEST: quality
 	char d = charToPhred33('J', xPHRED33);
 	printf("%c\t%d", d, phred33char_as_prob(d));
@@ -959,20 +1236,17 @@ int main(int argc, const char** argv)
 	//test_quality_strings();
 
 	return 0;
+	 */
 
 
 
 
-
-	if (0)
-	{
-
-
+/*
     //TODO ENABLE WHEN DONE
     if (0) {
     option_t *optList, *thisOpt;
 
-    /* get list of command line options and their arguments */
+    // get list of command line options and their arguments
     optList = NULL;
     optList = GetOptList(argc, (char**)argv, "a:bcd:ef?");
 
@@ -985,7 +1259,7 @@ int main(int argc, const char** argv)
     }
     else
     {
-		/* display results of parsing */
+		// display results of parsing
 		while (optList != NULL)
 		{
 			thisOpt = optList;
@@ -994,7 +1268,7 @@ int main(int argc, const char** argv)
 			if ('?' == thisOpt->option)
 			{
 		    	print_help();
-				FreeOptList(thisOpt);   /* free the rest of the list */
+				FreeOptList(thisOpt);   // free the rest of the list
 				return EXIT_SUCCESS;
 			}
 
@@ -1012,56 +1286,43 @@ int main(int argc, const char** argv)
 			}
 
 
-			free(thisOpt);    /* done with this item, free it */
+			free(thisOpt);    // done with this item, free it
 		}
     }
     }
-
-	}
-
-
+*/
 
 
 //TODO set and check parameter to be conflict-free
-    int qualtype = xPHRED33;
-    int trimmingminqual = 70; //(int)'A';
-    int trimstart=0;	//remove k leading chars before trimming
-    int trimend=0;	//remove k trailing chars before trimming
-    int cropstart=0;	//trim head of sequences to specified length
-    int cropend=0;	//trim 3'ends of sequences to specified length
-    int minlen=0;	//discard reads with len < k
-    int avgqual=0;	//discard reads with avgqual < k
+    qualtype = xPHRED33;
+    trimmingminqual = 70; //(int)'A';
+    trimstart=30;	//remove k leading chars before trimming
+    trimend=0;	//remove k trailing chars before trimming
+    cropstart=0;	//trim head of sequences to specified length
+    cropend=0;	//trim 3'ends of sequences to specified length
+    minlen=0;	//discard reads with len < k
+    avgqual=0;	//discard reads with avgqual < k
+    n_splitting=1; //get longest valid [ATCG] stretch of read
 
-    char* adptfle=NULL; //"/home/thieme/eclipse-workspace/SandRA/adapters.fasta";
-
-    int n_splitting=1; //get longest valid [ATCG] stretch of read
+    PE=0;		//do we have PE data?
 
     srand(time(NULL));
 
 
 
-
+    // get list of known adapters
+    char* adptfle=NULL; //"/home/thieme/eclipse-workspace/SandRA/adapters.fasta";
 
 	//read adaters from file when file is given...
-    if (NULL!=adptfle && !file_exists(adptfle))
+    if (NULL!=adptfle && file_exists(adptfle))
     {
-        printf("File failed to open: %s\n", adptfle);
-        exit(EXIT_FAILURE);
+        FILE *adptflep = fopen(adptfle, "r");
+        useradapters=read_adapters_from_file(adptflep);
     }
 
-    FILE *adptflep = fopen(adptfle, "r");
-    char** useradapters;
-    useradapters=read_adapters_from_file(adptflep);
-
-
-
-
-
-
-
       //char *fn1 = argv[1];
-    char * fn1="/home/thieme/eclipse-workspace/SandRA/test.fastq";
-    char * fn2="/home/thieme/eclipse-workspace/SandRA/test.fastq";
+    char * fn1="/home/thieme/eclipse-workspace/SandRA/test2.fastq";
+    char * fn2="/home/thieme/eclipse-workspace/SandRA/test2.fastq";
 
     if (!file_exists(fn1)) {
         printf("File failed to open: %s\n", fn1);
@@ -1076,18 +1337,15 @@ int main(int argc, const char** argv)
 
 
 
-    if (0)
-    {
 
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // get random entries
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+    if (0)
+    {
     FILE *fnrnd = fopen(fn1, "r");
 
-    sedata ** randomentries=NULL;
+    pedata ** randomentries=NULL;
     randomentries = get_random_entry(fnrnd, 5);
 
     int a2;
@@ -1111,7 +1369,6 @@ int main(int argc, const char** argv)
     detectedadapters=detect_adapters(randomentries);
 
 
-
 	//test for the blast procedure for auto-detected adapters
 	blast_adapters(detectedadapters);
 
@@ -1131,147 +1388,35 @@ int main(int argc, const char** argv)
     }
 
 
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // trim reads
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    FILE *fn1p = fopen(fn1, "r");
-    FILE *fn2p = fopen(fn2, "r");
 
-    pedata ** readlist=NULL;
-    //c2 = get_next_reads_to_process(fn1p,fn2p, 3);
-    //puts("::::::::::::::::::");
-    readlist = get_next_reads_to_process(fn1p,fn2p, 20);
+	infpR1= fopen(fn1, "r");
+	infpR2= fopen(fn2, "r");
 
+	int thdcnt;
 
-
-
-
-    int PE=0;		//do we have PE data?
-
-
-    int readentrycnt;
-    for (readentrycnt = 0; readentrycnt < 4; readentrycnt++)
-    {
-        //int thread_no;
-        //char [MAXREADLEN];
-    	printf(">>%i\n", readentrycnt);
-        printf("%s\n", readlist[readentrycnt]->readID1);
-        printf("%s\n", readlist[readentrycnt]->readID2);
+	pthread_t proc[THREADCOUNT];
+	for (thdcnt=0; thdcnt< THREADCOUNT; thdcnt++)
+	{
+		//pthread_create(&proc[thdcnt], NULL, worker, init_thread_data(thdcnt, infpR1, infpR2));
+		pthread_create(&proc[thdcnt], NULL, worker, thdcnt);
+	}
+	for (thdcnt=0; thdcnt< THREADCOUNT; thdcnt++)
+	{
+		pthread_join(proc[thdcnt],NULL);
+	}
 
 
+    fclose(infpR1);
+    fclose(infpR2);
 
-        printf("1l %s\n", readlist[readentrycnt]->read1);
-    	printf("1l %s\n", readlist[readentrycnt]->read2);
-
-
-        if (trimend>0) //needs to go first, otherwise trimstart will change sequence length
-        {
-            trim_end(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1, trimend);
-            if (PE)
-            {
-            	trim_end(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2, trimend);
-            }
-        }
-        if (trimstart>0)
-        {
-        	trim_start(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1, trimstart);
-            if (PE)
-            {
-                trim_start(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2, trimstart);
-            }
-        }
-        if (cropstart>0)
-        {
-            crop_start(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1, cropstart);
-            if (PE)
-            {
-            	crop_start(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2, cropstart);
-            }
-        }
-        if (cropend>0)
-        {
-            crop_end(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1, cropend);
-            if (PE)
-            {
-            	crop_end(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2, cropend);
-            }
-        }
-
-
-
-
-        if (n_splitting>0)
-        {
-        	trim_to_longest_valid_section(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1);
-			if (PE)
-			{
-				trim_to_longest_valid_section(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2);
-			}
-        }
-
-
-
-
-
-        if (trimmingminqual>0)
-        {
-			trim_read(readlist[readentrycnt]->read1, readlist[readentrycnt]->phred1,
-					trimmingminqual, 	//cut-off value for dynamic trimming
-					qualtype	//phred33/64/solexa
-			);
-			if (PE)
-			{
-				trim_read(readlist[readentrycnt]->read2, readlist[readentrycnt]->phred2,
-						trimmingminqual, 	//cut-off value for dynamic trimming
-						qualtype	//phred33/64/solexa
-				);
-			}
-        }
-
-
-
-        if (minlen>0)
-        {
-        	if (strlen(readlist[readentrycnt]->read1)<minlen)
-        	{
-        		printf("read mate1 too short\n");
-        	}
-        	if (PE && strlen(readlist[readentrycnt]->read2)<minlen)
-        	{
-        		printf("read mate2 too short\n");
-        	}
-        }
-
-        avgqual=70;
-        if (avgqual>0)
-        {
-        	//TODO ensure that avgqual-scoring matches qualtype
-        	if (calc_avgqual(readlist[readentrycnt]->phred1, qualtype)<avgqual)
-        	{
-        		printf("read mate1 has too low quality\n");
-        	}
-        	if (calc_avgqual(readlist[readentrycnt]->phred2, qualtype)<avgqual)
-        	{
-        		printf("read mate2 has too low quality\n");
-        	}
-        }
-
-
-        printf("1 %s\n", readlist[readentrycnt]->read1);
-        printf("2 %s\n", readlist[readentrycnt]->phred1);
-    	//printf("2l %s\n", readlist[readentrycnt]->read2);
-    	//printf("2l %s\n", readlist[readentrycnt]->phred2);
-
-
-    }
-
-
-
-    fclose(fn1p);
-    fclose(fn2p);
-
+	printf("Done. Number of reads processed: %d\n", reads_processed);
 
 
     return EXIT_SUCCESS;
