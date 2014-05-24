@@ -625,6 +625,7 @@ void trim_to_longest_valid_section(char* read, char* phred)
 		trim_start(&read, &phred, longeststart+1);
 	}
 
+	printf("N-based trimming to [%d:%d] %d\n", longeststart, longestend, longestend-longeststart);
 	return;
 }
 
@@ -886,18 +887,16 @@ void trim_read(char * read, char * phred, int minqual, int qualtype)
 	}
 
 
-	if (longestend<strlen(phred))
+	if (longestend<strlen(read))
 	{
-		//TODO woher kommt dieser offset? - speichere ich einen zyklus zu spät?
-		trim_end(&read, &phred, longestend+1);
+		crop_end(&read, &phred, longestend+1);
 	}
 	if (longeststart>0)
 	{
-		//TODO woher kommt dieser offset? - speichere ich einen zyklus zu spät?
 		trim_start(&read, &phred, longeststart+1);
 	}
 
-	//printf("trimming to [%d:%d] %d\n", longeststart, longestend, longestend-longeststart);
+	printf("Q-based trimming to [%d:%d] %d\n", longeststart, longestend, longestend-longeststart);
 	//printf("y %s\ny %s\n", read, phred);
 
 	return;
