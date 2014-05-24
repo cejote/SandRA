@@ -42,7 +42,7 @@ def main(argv):
     adapterlen=30
     errorrate = 0.05
 
-    readcount = 20
+    readcount = 2000
     readlen = 100
     minreadlen=40
     readlendelta=20
@@ -81,7 +81,7 @@ def main(argv):
         print "@Seq_%d_%s_%i"% (read, adaptseq, len(adaptseq))
         print  adaptseq + readseq
         print "+"
-        print "I"*len(readseq)
+        print "I"*len(adaptseq + readseq)
 
         
     #gst = STREE.GeneralisedSuffixTree([x[0].lower() for x in treeseqs])

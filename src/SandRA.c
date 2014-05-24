@@ -28,9 +28,6 @@
 #include <pthread.h>    /* POSIX Threads */
 #include <string.h>     /* String handling */
 
-#include "optlist.h"	/* parse parameters from cmd line */
-
-
 
 
 // defines
@@ -129,8 +126,11 @@ typedef struct pe_data
 
 
 
-// functions
 
+
+
+
+// functions
 
 
 void print_help()
@@ -138,26 +138,18 @@ void print_help()
 	/*
 	 * say hello, say what to provide...
 	 *
-	 *TODO: adopt to our needs ;)
 	 */
     printf("SandRA Version ###\n\n");
     printf("Usage: SandRA <options>\n");
     printf("options:\n");
-    printf("  -a : option excepting argument.\n");
-    printf("  -b : option without arguments.\n");
-	printf("  -c : option without arguments.\n");
-	printf("  -d : option excepting argument.\n");
-	printf("  -e : option without arguments.\n");
-	printf("  -f : option without arguments.\n");
-	printf("  -?  : print out command line options.\n\n");
+    //TODO ....
+    printf("  -?  : print out command line options.\n\n");
+    printf("When using, please cite:\n");
+    //TODO ...
+    printf("Thieme, Schudoma et al, 2014\n");
+
 	return;
 }
-
-
-
-
-
-
 
 
 int file_exists(const char * filename)
@@ -206,15 +198,6 @@ char* reverse_complement(char* seq)
 	}
 	return rc;
 }
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1239,7 +1222,6 @@ void* worker(int id)
 		//printf("%d %d", readentrypos, READBLOCKSIZE);
 	}
 
-	printf("done thread %d\n", id);
 	return NULL;
 }
 
@@ -1340,67 +1322,12 @@ int main(int argc, const char** argv)
 
 
 
-/*
-    //TODO ENABLE WHEN DONE
-    if (0) {
-    option_t *optList, *thisOpt;
-
-    // get list of command line options and their arguments
-    optList = NULL;
-    optList = GetOptList(argc, (char**)argv, "a:bcd:ef?");
 
 
-    if (optList==NULL)
-    {
-    	printf("No parameters given to run the program.\n");
-    	print_help();
-		return EXIT_FAILURE;
-    }
-    else
-    {
-		// display results of parsing
-		while (optList != NULL)
-		{
-			thisOpt = optList;
-			optList = optList->next;
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // parse options
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-			if ('?' == thisOpt->option)
-			{
-		    	print_help();
-				FreeOptList(thisOpt);   // free the rest of the list
-				return EXIT_SUCCESS;
-			}
-
-
-			//parse user input
-			printf("found option %c\n", thisOpt->option);
-			if (thisOpt->argument != NULL)
-			{
-				printf("\tfound argument %s", thisOpt->argument);
-				printf(" at index %d\n", thisOpt->argIndex);
-			}
-			else
-			{
-				printf("\tno argument for this option\n");
-			}
-
-
-			free(thisOpt);    // done with this item, free it
-		}
-    }
-    }
-*/
-
-
-
-
-
-
-
-
-
-
-//TODO set and check parameter to be conflict-free
     qualtype = xPHRED33;
     //trimmingminqual = 70; //(int)'A';
 
@@ -1415,23 +1342,71 @@ int main(int argc, const char** argv)
 
     PE=0;		//do we have PE data?
 
-    srand(time(NULL));
+    char * fn1="/home/thieme/eclipse-workspace/SandRA/test2.fastq";
+    char * fn2="/home/thieme/eclipse-workspace/SandRA/test2.fastq";
+    char * outfn1="/home/thieme/eclipse-workspace/SandRA/test2.out1.fastq";
+    char * outfn2=NULL;
+    char* adptfle=NULL; //"/home/thieme/eclipse-workspace/SandRA/adapters.fasta";
+
+
+    //parse options
+    int i;
+    for(i=1;i<argc;i++)
+    {
+    	/*
+    	if ((strcmp(argv[i], "--R1")) or (strcmp(argv[i], "--file1")))    		{fn1=argv[++i];}
+    	else if ((strcmp(argv[i], "--R2")) or (strcmp(argv[i], "--file2")))   	{fn2=argv[++i];}
+    	else if ((strcmp(argv[i], "--outR1")) or (strcmp(argv[i], "--out1")))   {outfn1=argv[++i];}
+    	else if ((strcmp(argv[i], "--outR2")) or (strcmp(argv[i], "--out2")))   {outfn2=argv[++i];}
+
+
+    	else if (strcmp(argv[i], "--trimstart"))	{trimstart=argv[++i];}
+    	else if (strcmp(argv[i], "--trimend"))	{trimend=argv[++i];}
+    	else if (strcmp(argv[i], "--cropstart"))	{cropstart=argv[++i];}
+    	else if (strcmp(argv[i], "--cropend"))	{cropend=argv[++i];}
+
+    	else if ((strcmp(argv[i], "--adapters"))	{adptfle=argv[++i];}
+
+
+    	else if (strcmp(argv[i], "--minlen"))	{=argv[++i];}
+    	else if (strcmp(argv[i], "--avgqual"))	{=argv[++i];}
+    	else if (strcmp(argv[i], "--n_splitting"))
+    	{
+    		if ((strcmp(argv[++i], "ignore")) {qualtype = xIGNORE;}
+    		else if ((strcmp(argv[++i], "trimlongest")) {qualtype = xTRIMLONGEST;}
+    		else if ((strcmp(argv[++i], "trimstart")) {qualtype = xTRIMSTART;}
+    		else if ((strcmp(argv[++i], "trimend")) {qualtype = xTRIMEND;}
+    		else (printf("option not recognized");print_help(); return 1;)
+    	}
+
+    	else if (strcmp(argv[i], "--phred"))
+    	{
+    		if (strcmp(argv[++i], "phred33")) {qualtype = xPHRED33;}
+    		else if (strcmp(argv[++i], "phred64")) {qualtype = xPHRED64;}
+    		else if (strcmp(argv[++i], "solexa")) {qualtype = xSOLEXA;}
+    		else (printf("option not recognized");print_help(); return 1;)
+    	}
+
+
+    	else if (strcmp(argv[i], "--help"))	{=argv[++i];}
+
+
+    	else if (strcmp(argv[i], "--help") or strcmp(argv[i], "-h")) {print_help();}
+    	else {print_help(); return 1;}
+    	*/
+    }
+
+    //TODO set and check parameter to be conflict-free!
 
 
 
     // get list of known adapters
-    char* adptfle=NULL; //"/home/thieme/eclipse-workspace/SandRA/adapters.fasta";
-
 	//read adaters from file when file is given...
     if (NULL!=adptfle && file_exists(adptfle))
     {
         FILE *adptflep = fopen(adptfle, "r");
         useradapters=read_adapters_from_file(adptflep);
     }
-
-      //char *fn1 = argv[1];
-    char * fn1="/home/thieme/eclipse-workspace/SandRA/test2.fastq";
-    char * fn2="/home/thieme/eclipse-workspace/SandRA/test2.fastq";
 
     if (!file_exists(fn1)) {
         printf("File failed to open: %s\n", fn1);
