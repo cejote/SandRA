@@ -58,7 +58,14 @@ int THREADCOUNT =10;
 int READBLOCKSIZE = 11;
 
 
-int reads_processed = 0;
+long unsigned int reads_processed = 0;
+long unsigned int reads_trimmed3 = 0;
+long unsigned int reads_trimmed5= 0;
+long unsigned int reads_trimmed35 = 0;
+
+
+
+
 
 
 //pthread_cond_t items = PTHREAD_COND_INITIALIZER;
@@ -69,8 +76,13 @@ pthread_mutex_t readfilelock = PTHREAD_MUTEX_INITIALIZER;
 
 	FILE *infpR1;
 	FILE *infpR2;
-	FILE *outfpR1;
-	FILE *outfpR2;
+
+	FILE *outfpR1perfect;
+	FILE *outfpR2perfect;
+	FILE *outfpR1discarded;
+	FILE *outfpR2discarded;
+
+	FILE *outflog;
 
 
 
@@ -202,27 +214,27 @@ char* reverse_complement(char* seq)
 
 
 
-void trim_start(char ** cp1, char ** cp2, int n)
+void trim_start(char ** read, char ** phred, int n)
 {
 	/*
 	 * remove k leading chars
 	 * Clips n characters from 5'-end.
 	 */
-	int len = (int)strlen(*cp1);
-	*cp1 += MIN(MAX(0, n), len - 1); // correct offset?
-	*cp2 += MIN(MAX(0, n), len - 1); // correct offset?
+	int len = (int)strlen(*read);
+	*read += MIN(MAX(0, n), len - 1); // correct offset?
+	*phred += MIN(MAX(0, n), len - 1); // correct offset?
 	return ;
 }
 
-void trim_end(char ** cp1, char ** cp2, int n)
+void trim_end(char ** read, char ** phred, int n)
 {
 	/*
 	 * remove k trailing chars
 	 */
 
-	int len = (int)strlen(*cp1);
-	*(*cp1 + MIN(MAX(0, len-n), len)) = 0;
-	*(*cp2 + MIN(MAX(0, len-n), len)) = 0;
+	int len = (int)strlen(*read);
+	*(*read + MIN(MAX(0, len-n), len)) = 0;
+	*(*phred + MIN(MAX(0, len-n), len)) = 0;
 
 	return ;
 }
@@ -231,29 +243,29 @@ void trim_end(char ** cp1, char ** cp2, int n)
 
 
 
-void crop_start(char ** cp1, char ** cp2, int n)
+void crop_start(char** read, char** phred, int n)
 {
 	/*
 	 * crop head of sequences to specified length
 	 * move start to pos n
 	 */
 
-	int len = (int)strlen(*cp1);
-	*cp1 += MIN(MAX(0, len-n), len - 1); // correct offset?
-	*cp2 += MIN(MAX(0, len-n), len - 1); // correct offset?
+	int len = (int)strlen(*read);
+	*read += MIN(MAX(0, len-n), len - 1); // correct offset?
+	*phred += MIN(MAX(0, len-n), len - 1); // correct offset?
 	return ;
 
 }
 
-void crop_end(char ** cp1, char ** cp2, int n)
+void crop_end(char ** read, char ** phred, int n)
 {
 	/*
 	 * Sets read length to n.
 	 * crop 3'ends of sequences to specified length
 	 */
-	int len = (int)strlen(*cp1);
-	*(*cp1 + MIN(MAX(0, n), len)) = 0;
-	*(*cp2 + MIN(MAX(0, n), len)) = 0;
+	int len = (int)strlen(*read);
+	*(*read + MIN(MAX(0, n), len)) = 0;
+	*(*phred + MIN(MAX(0, n), len)) = 0;
 	return ;
 }
 
@@ -895,6 +907,49 @@ void trim_read(char * read, char * phred, int minqual, int qualtype)
 
 
 
+
+//TODO trimming tree is to be used as second parameter
+void trim_adapters((char** read, char** phred)
+{
+	/*
+	 *
+	 * trim sequences
+	 *
+	 *
+	 * uses globar var useradapters
+	 *
+	 */
+
+
+	int i=0;
+	while(NULL!=useradapters[i])
+	{
+		printf(">adapter_%d\n%s\n", i, read);
+		//todo: tree.
+		++i;
+	}
+
+	//trimmed 3'
+	++reads_trimmed3 = 0;
+	//trimmed 5'
+	++reads_trimmed5= 0;
+	//trimmed both ends
+	++reads_trimmed35 = 0;
+
+
+
+	return;
+
+}
+
+
+
+
+
+
+
+
+
 char** detect_adapters(pedata** randomreads)
 {
 	/*
@@ -1148,6 +1203,17 @@ void* worker(int id)
 
 
 
+	        //TODO trimming tree is to be used as second parameter
+	        trim_adapters(readlist[readentrypos]->read1, readlist[readentrypos]->phred1)
+			if (PE)
+			{
+				trim_adapters(readlist[readentrypos]->read2, readlist[readentrypos]->phred2)
+			}
+
+
+
+
+
 	        if (trimmingminqual>0)
 	        {
 				trim_read(readlist[readentrypos]->read1, readlist[readentrypos]->phred1,
@@ -1199,7 +1265,7 @@ void* worker(int id)
 
 			if (0==reads_processed%10 && reads_processed)
 			{
-				fprintf (stderr, "%d reads processed.\n", reads_processed);
+				fprintf (stderr, "%lu reads processed.\n", reads_processed);
 			}
 			++reads_processed;
 
@@ -1500,7 +1566,8 @@ int main(int argc, const char** argv)
     fclose(infpR1);
     fclose(infpR2);
 
-	printf("Done. Number of reads processed: %d\n", reads_processed);
+	printf("Done.");
+	printf("Number of reads processed: %lu\n", reads_processed);
 
 
     return EXIT_SUCCESS;
