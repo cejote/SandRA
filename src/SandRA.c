@@ -74,15 +74,15 @@ pthread_mutex_t readfilelock = PTHREAD_MUTEX_INITIALIZER;
 
 
 
-	FILE *infpR1;
-	FILE *infpR2;
+FILE *infpR1;
+FILE *infpR2;
 
-	FILE *outfpR1perfect;
-	FILE *outfpR2perfect;
-	FILE *outfpR1discarded;
-	FILE *outfpR2discarded;
+FILE *outfpR1perfect;
+FILE *outfpR2perfect;
+FILE *outfpR1discarded;
+FILE *outfpR2discarded;
 
-	FILE *outflog;
+FILE *outflog;
 
 
 
@@ -1255,10 +1255,16 @@ void* worker(int id)
 	        	}
 	        }
 
+
+
+
+
 	        printf("danach1 %s\n", readlist[readentrypos]->read1);
 	        printf("danach2 %s\n", readlist[readentrypos]->phred1);
 	    	//printf("2l %s\n", readlist[readentrypos]->read2);
 	    	//printf("2l %s\n", readlist[readentrypos]->phred2);
+
+
 
 
 
@@ -1274,12 +1280,18 @@ void* worker(int id)
 
 
 
+
+
         //TODO write output to file
 		/*
 		readentrypos=0;
 		for (readentrypos=0; readentrypos<READBLOCKSIZE;readentrypos++)
 		{
-			;
+			fprintf(outfpR1perfect, "%s\n%s\n+\n%s\n", readlist[readentrypos]->readID1, readlist[readentrypos]->read1, readlist[readentrypos]->phred1);
+			fprintf(outfpR2perfect, "%s\n%s\n+\n%s\n", readlist[readentrypos]->readID2, readlist[readentrypos]->read2, readlist[readentrypos]->phred2);
+
+			fprintf(outfpR1discarded, "%s\n%s\n+\n%s\n", readlist[readentrypos]->readID1, readlist[readentrypos]->read1, readlist[readentrypos]->phred1);
+			fprintf(outfpR2discarded, "%s\n%s\n+\n%s\n", readlist[readentrypos]->readID2, readlist[readentrypos]->read2, readlist[readentrypos]->phred2);
 		}
 		 */
 
