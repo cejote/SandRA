@@ -28,7 +28,11 @@
 #include <pthread.h>    /* POSIX Threads */
 #include <string.h>     /* String handling */
 
+#include <ctype.h>
 
+
+#include "sfxtree.h"	/* just treeming */
+#include "seqfun.h"		/*  */
 
 // defines
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -135,7 +139,9 @@ typedef struct pe_data
 
     char** useradapters=NULL; // get list of known adapters
 
-
+	int cutoffperc=90;	//poly-A detection - skip elongation when below this score
+	int startlen=10;	//poly-A detection - required seed
+	int startcutoff=80;	//poly-A detection - percentage within seed
 
 
 
@@ -176,141 +182,6 @@ int file_exists(const char * filename)
 }
 
 
-void remove_newline(char * line)
-{
-  int len = (int)strlen(line) - 1;
-  if(line[len] == '\n') { line[len] = 0; }
-  return ;
-}
-
-
-
-
-char* reverse_complement(char* seq)
-{
-	/*
-	 *
-	 * non-inplace version of reverse complement
-	 *
-	 */
-	char * rc = (char*)malloc(sizeof(char)*strlen(seq));
-	int i,j;
-	j=0;
-	for(i=(int)strlen(seq)-1; i>=0; --i)
-	{
-		switch(seq[i])
-		{
-			case 'A': rc[j++]='T'; break;
-			case 'C': rc[j++]='G';break;
-			case 'G': rc[j++]='C';break;
-			case 'T': rc[j++]='A';break;
-			//todo errorhandling
-			default: return NULL;
-		}
-	}
-	return rc;
-}
-
-
-
-
-void trim_start(char ** read, char ** phred, int n)
-{
-	/*
-	 * remove k leading chars
-	 * Clips n characters from 5'-end.
-	 */
-	int len = (int)strlen(*read);
-	*read += MIN(MAX(0, n), len - 1); // correct offset?
-	*phred += MIN(MAX(0, n), len - 1); // correct offset?
-	return ;
-}
-
-void trim_end(char ** read, char ** phred, int n)
-{
-	/*
-	 * remove k trailing chars
-	 */
-
-	int len = (int)strlen(*read);
-	*(*read + MIN(MAX(0, len-n), len)) = 0;
-	*(*phred + MIN(MAX(0, len-n), len)) = 0;
-
-	return ;
-}
-
-
-
-
-
-void crop_start(char** read, char** phred, int n)
-{
-	/*
-	 * crop head of sequences to specified length
-	 * move start to pos n
-	 */
-
-	int len = (int)strlen(*read);
-	*read += MIN(MAX(0, len-n), len - 1); // correct offset?
-	*phred += MIN(MAX(0, len-n), len - 1); // correct offset?
-	return ;
-
-}
-
-void crop_end(char ** read, char ** phred, int n)
-{
-	/*
-	 * Sets read length to n.
-	 * crop 3'ends of sequences to specified length
-	 */
-	int len = (int)strlen(*read);
-	*(*read + MIN(MAX(0, n), len)) = 0;
-	*(*phred + MIN(MAX(0, n), len)) = 0;
-	return ;
-}
-
-
-
-
-int is_valid_character(char c)
-{
-	switch(c)
-	{
-		case 'A': break;
-		case 'C': break;
-		case 'G': break;
-		case 'T': break;
-
-//TODO case sensitive
-		case 'a': break;
-		case 'c': break;
-		case 'g': break;
-		case 't': break;
-		default: return 0;
-	}
-	return 1;
-}
-
-
-
-int valid_characters(char * line)
-{
-	int pos;
-	for (pos=0; pos<strlen(line); pos++)
-	{
-		if (!is_valid_character((line[pos])))
-		{
-		      return 0;
-		}
-	}
-	return 1;
-}
-
-
-
-
-
-
 
 pedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
 {
@@ -339,10 +210,20 @@ pedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
     srand(time(NULL));
 
 
+    if (file_length<200000*10*200*3)
+    {
+    	//200000 reads * 10 to have some choices * 200 linelen * 3 headerstring, readstring, and qualstring
+    	//TODO parameter
+    	fprintf(stderr, "Too few entries to perform an automated primer detection. Sorry, try again with more data or trim to known adapters, only (parameter -a).");
+    }
+
 
 	pedata** struclist = (pedata**)malloc(sizeof(pedata*) * N);
 	char currline[MAXREADLEN];
 
+
+    //TODO: if no +-@-combination is present we'll get stuck here -set limit!
+	int breakout = 1000;
 
     int x;
     for (x = 0; x < N; ++x)
@@ -353,8 +234,6 @@ pedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
         fseek(fp, seekpos, SEEK_SET);
         while (1)
         {
-            //TODO: if no +-@-combination is present we'll get stuck here
-
 
         	if (NULL == fgets(currline, sizeof(currline), fp)){break;}
             else{
@@ -511,118 +390,6 @@ pedata** get_next_reads_to_process(unsigned int N)
 
 
 
-
-
-
-void crop_to_valid_end(char* read, char* phred)
-{
-	/*
-	 * remove leading section of read
-	 * [xxNxxxN]acgtagctgc
-	 *
-	 */
-
-	int pos;
-	int invalidpos=0;
-
-	//find last invalid char
-	for (pos=0; pos<strlen(read); pos++)
-	{
-		if (!is_valid_character(read[pos]))
-		{
-			invalidpos=pos;
-		}
-	}
-
-
-	if (invalidpos)
-	{
-		crop_end(&read, &phred, invalidpos);
-	}
-}
-
-
-
-
-void crop_to_valid_start(char* read, char* phred)
-{
-	/*
-	 * remove trailing section of read
-	 * acgtagctgc[NxxxNxxNxx]
-	 *
-	 */
-	int pos;
-
-	//find first invalid char
-	for (pos=0; pos<strlen(read); pos++)
-	{
-		//printf("%d\t%c\n", pos, read[pos]);
-		if (!is_valid_character(read[pos]))
-		{
-			//printf("%d %c\n", pos, read[pos]);
-			crop_end(&read, &phred, pos);
-			return;
-		}
-	}
-
-	return;
-}
-
-
-
-
-
-void trim_to_longest_valid_section(char* read, char* phred)
-{
-	/*
-	 * find longest stretch of [ATCG]
-	 *
-	 */
-	int pos;
-
-	int longeststart=0;
-	int longestend=0;
-
-	int tmplongeststart=0;
-	int tmplongestend=0;
-
-
-	//determine longest continuous section
-	for (pos=0; pos<strlen(read); pos++)
-	{
-		//printf("%d\t%c\n", pos, read[pos]);
-		if (is_valid_character(read[pos]))
-		{
-			tmplongestend=pos;
-
-			if ((tmplongestend-tmplongeststart) >(longestend-longeststart))
-			{
-				longeststart=tmplongeststart;
-				longestend=tmplongestend;
-			}
-		}
-		else
-		{
-			tmplongeststart=pos;
-			tmplongestend=pos;
-		}
-		//printf("\t[%d:%d]\n", longeststart, longestend);
-
-
-	}
-
-	if (longestend<strlen(read))
-	{
-		crop_end(&read, &phred, longestend+1);
-	}
-	if (longeststart>0)
-	{
-		trim_start(&read, &phred, longeststart+1);
-	}
-
-	printf("N-based trimming to [%d:%d] %d\n", longeststart, longestend, longestend-longeststart);
-	return;
-}
 
 
 
@@ -793,32 +560,7 @@ char charToPhred33(char c, int qualtype)
 }
 
 
-void test_quality_strings()
-{
-	char * SANGER= "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHI";
-	char * SOLEXA= ";<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefgh";
-	char * ILLUMINA15= "BCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefgh";
 
-	int pos;
-	for (pos=0; pos<strlen(SANGER); pos++)
-	{
-		printf("%c",  charToPhred33(SANGER[pos], xPHRED33));
-	}
-	printf("\n");
-	for (pos=0; pos<strlen(SOLEXA); pos++)
-	{
-		printf("%c",  charToPhred33(SOLEXA[pos], xSOLEXA));
-	}
-	printf("\n");
-	for (pos=0; pos<strlen(ILLUMINA15); pos++)
-	{
-		printf("%c",  charToPhred33(ILLUMINA15[pos], xPHRED64));
-	}
-	printf("\n");
-
-	return;
-
-}
 
 
 
@@ -837,6 +579,59 @@ float calc_avgqual(char * phred, int qualtype)
 	}
 	return (qualvalue/(float)strlen(phred));
 }
+
+
+
+
+
+void polyA_trim_read(char ** read, char ** phred, int cutoffperc, int startlen, int startcutoff)
+{
+	/*
+	 * cutoffperc - cut when below this value
+	 * startlen - start section which needs to be above startcutoff
+	 * startcutoff - threshold for start section
+	 *
+	 * do quality-based read trimming based on max-coverage window
+	 *
+	 *
+	 * TODO: Poly-T @ RC
+	 *
+	 */
+
+	if (strlen(*read)<=10)
+	{
+		//TODO
+		*read=NULL;
+		*phred=NULL;
+	}
+
+
+	int acnt=0;
+	int lastpos=0;
+	int pos;
+	for (pos=0; pos<startlen; pos++)
+	{
+		//printf("%c\n", (*read)[pos]);
+		if ((*read)[pos]=='A')
+		{
+			++acnt;
+			lastpos=pos; //might result in trimmed sections smaller than startlen
+		}
+	}
+
+
+	if (100.0*((double)acnt/startlen)<startcutoff) return;
+
+	for (pos=startlen; pos<strlen(*read); pos++)
+		if ((*read)[pos]=='A')
+			if (100.0*((double)++acnt/pos)>cutoffperc) lastpos=pos; //might result in trimmed sections smaller than startlen
+
+	trim_start(read, phred, lastpos+1);
+	return;
+}
+
+
+
 
 
 
@@ -909,12 +704,10 @@ void trim_read(char * read, char * phred, int minqual, int qualtype)
 
 
 //TODO trimming tree is to be used as second parameter
-void trim_adapters((char** read, char** phred)
+void trim_adapters(char** read, char** phred)
 {
 	/*
-	 *
 	 * trim sequences
-	 *
 	 *
 	 * uses globar var useradapters
 	 *
@@ -924,17 +717,17 @@ void trim_adapters((char** read, char** phred)
 	int i=0;
 	while(NULL!=useradapters[i])
 	{
-		printf(">adapter_%d\n%s\n", i, read);
+		printf(">adapter_%d\n%s\n", i, *read);
 		//todo: tree.
 		++i;
 	}
 
 	//trimmed 3'
-	++reads_trimmed3 = 0;
+	++reads_trimmed3;
 	//trimmed 5'
-	++reads_trimmed5= 0;
+	++reads_trimmed5;
 	//trimmed both ends
-	++reads_trimmed35 = 0;
+	++reads_trimmed35;
 
 
 
@@ -959,9 +752,13 @@ char** detect_adapters(pedata** randomreads)
 	 */
 
 
+
 	int i=0;
 	while(NULL!=randomreads[i])
 	{
+		//trimming/cropping()
+		//polyA_trim_read()
+
 		printf(">adapter_%d\n%s\n", i, randomreads[i]->read1);
 		//todo: tree.
 		++i;
@@ -993,7 +790,7 @@ char** read_adapters_from_file(FILE *fp)
 
     int cnt=0;
 
-	while(1)
+	while(cnt<MAXADAPTERNUM)
 	{
 		if (NULL == fgets(tmpline, MAXREADLEN-1, fp))
 		{
@@ -1035,17 +832,20 @@ int blast_adapters(char** adapters)
 	FILE *fp;
 	int i;
 
+	//create tmpfile
 	fp = fopen("blastlist.fasta", "w+");
 	if (fp == NULL)
 	{
-		printf("I couldn't open blastlist.fasta for writing.\n");
+		fprintf(stderr, "I couldn't open blastlist.fasta for writing.\n");
 		return -1;
 	}
 
+	//write qry to tmpfile
 	i=0;
 	while(NULL!=adapters[i])
 	{
-		fprintf(fp, ">adapter_%d\n%s\n", i, adapters[i]);
+		//provide int id as adapter name
+		fprintf(fp, ">%d\n%s\n", i, adapters[i]);
 		++i;
 	}
 	fclose(fp);
@@ -1058,24 +858,66 @@ int blast_adapters(char** adapters)
 
 	//blast file
 	FILE *blastpipe;
-	blastpipe = popen("blastn -db blastref/blastlistref.db -num_threads 10 -outfmt 6 -query blastlist.fasta -perc_identity 80", "r");
+	//TODO evalue?
+	//TODO remove from list => NULL?
+
+	//char qseqid[200];
+	int qseqid, qstart, qend, qlen, nident, sstart, send;
+
+
+
+	blastpipe = popen("blastn -db blastref/blastlistref.db -num_threads 10 -outfmt \"6 qseqid qstart qend qlen nident sstart send\" -query blastlist.fasta -perc_identity 80 -word_size 7 -max_target_seqs 1 ", "r");
 	if (blastpipe != NULL)
 	{
 		while (1)
 		{
 			char *line;
-			char buf[1000];
+			char buf[100];
 			line = fgets(buf, sizeof buf, blastpipe);
 			if (line == NULL) break;
+			//printf("%s", line);
+			sscanf(line, "%i\t%i\t%i\t%i\t%i\t%i\t%i", &qseqid,&qstart, &qend, &qlen, &nident, &sstart, &send);
+			//printf(">>> %s\t%i\t%i\t%i\t%i\t%i\t%i\n", qseqid,qstart, qend, qlen, nident, sstart, send);
 
-			//todo parse results
-			//todo filter adapter
-			printf("%s", line);
+			//printf("%d %d\t%d\n", qlen, nident, qlen-nident);
+
+			//TODO coverage
+			if ((double)nident/qlen>0.80)
+			{
+				printf("Blacklisting adapter %s\n", adapters[qseqid]);
+				adapters[qseqid]=0;
+			}
+
+
 		}
 		pclose(blastpipe);
 	}
 	return 0;
 }
+
+
+
+int eval_adapters(char** adapters)
+{
+	/*
+	 * check adapters to be present within mids of input reads
+	 *
+	 * TODO implementation
+	 *
+	 * TODO using tree, exact matches, only?
+	 *
+	 */
+
+	int i=0;
+	while(NULL!=adapters[i])
+	{
+		printf("%d\n%s\n", i, adapters[i]);
+		++i;
+	}
+
+	return 0;
+}
+
 
 
 
@@ -1124,6 +966,9 @@ void* worker(int id)
 
 
 
+	        // TODO insert polyA_trim_read()
+
+
 
 	        if (trimend>0) //needs to go first, otherwise trimstart will change sequence length
 	        {
@@ -1163,6 +1008,8 @@ void* worker(int id)
 	        }
 
 
+
+	        //TODO correct pointer references?
 	        if (n_splitting==xTRIMLONGEST)
 	        {
 	        	printf("xTRIMLONGEST\n");
@@ -1204,10 +1051,10 @@ void* worker(int id)
 
 
 	        //TODO trimming tree is to be used as second parameter
-	        trim_adapters(readlist[readentrypos]->read1, readlist[readentrypos]->phred1)
+	        trim_adapters(&readlist[readentrypos]->read1, &readlist[readentrypos]->phred1);
 			if (PE)
 			{
-				trim_adapters(readlist[readentrypos]->read2, readlist[readentrypos]->phred2)
+				trim_adapters(&readlist[readentrypos]->read2, &readlist[readentrypos]->phred2);
 			}
 
 
@@ -1309,37 +1156,52 @@ void* worker(int id)
 
 
 
-
-
-
-
-
-
-/*
-threaddata* init_thread_data (int i, FILE *infileR1, FILE *infileR2)
+void test_quality_strings()
 {
-	/ *
-	 * init data object for each thread
-	 * /
+	char * SANGER= "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHI";
+	char * SOLEXA= ";<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefgh";
+	char * ILLUMINA15= "BCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefgh";
 
-	threaddata *tdata;
-	tdata = (threaddata *)malloc (sizeof (threaddata));
-	if (tdata == NULL) return (NULL);
+	int pos;
+	for (pos=0; pos<strlen(SANGER); pos++)
+	{
+		printf("%c",  charToPhred33(SANGER[pos], xPHRED33));
+	}
+	printf("\n");
+	for (pos=0; pos<strlen(SOLEXA); pos++)
+	{
+		printf("%c",  charToPhred33(SOLEXA[pos], xSOLEXA));
+	}
+	printf("\n");
+	for (pos=0; pos<strlen(ILLUMINA15); pos++)
+	{
+		printf("%c",  charToPhred33(ILLUMINA15[pos], xPHRED64));
+	}
+	printf("\n");
 
-	tdata->id = i;
-	tdata->infpR1=infileR1;
-	tdata->infpR2=infileR2;
+	return;
 
-	return (tdata);
 }
-*/
-
-
 
 int functiontests()
 {
 
-	if (0){
+
+	//poly-A removal
+	if (1){
+	    char * c;
+	    char * p;
+		c = "AAAAAAAAGAATAAAAAGCANATAAAAGCTGATGCTGCGTAGCTGCANTCTNG";
+		p = "12345678901234567890123456789012345678901234567890123";
+
+		polyA_trim_read(&c,&p,cutoffperc,startlen,startcutoff);
+		printf(">>\n%s\n%s\n", c,p);
+	}
+
+	return 0;
+
+	//RC
+	if (1){
 	//RC
 	char* c1 = "GTGCTAGCTGATGCTGCGTAGCTGCAGGGG";
 	char* q;
@@ -1348,7 +1210,9 @@ int functiontests()
 	printf("RC %s\n",q);
 	}
 
-	//TEST: trim @N test case
+
+
+	//trim @N test case
 	char* c = "GTGCTAGCTGATGCTGCGTAGCTGCATCTG";
 	char* p = "123456789012345678901234567890";
 
@@ -1377,11 +1241,57 @@ int main(int argc, const char** argv)
 {
     srand(time(NULL));
 
+    /*
+
+	char* p = "chsahkjsfdlsg";
+
+    printf("%s\n", p);
+    strupr(&p);
+    printf("%s\n", p);
+
+
+    return 0;
+     */
+
+
+    //int ** encodedStringList = malloc(sizeof(int*) * 10);
+    char * string1 = malloc(10 * sizeof(char));
+    char * string2 = malloc(10 * sizeof(char));
+    char * string3 = malloc(10 * sizeof(char));
+
+    SFXTreeWrapper * sfx = initWrapper();
+
+
+    strncpy(string1, "TACCCAATG\0", 10);
+    strncpy(string2, "ATACCGAAT\0", 10);
+    strncpy(string3, "CGAATAATC\0", 10);
+
+
+    addString(&sfx, string1, -1);
+    printf("////////////////////////////////////////////////////////////////////////////////////////////7\n");
+    showTree(sfx->tree, 0);
+    addString(&sfx, string2, -2);
+    printf("////////////////////////////////////////////////////////////////////////////////////////////7\n");
+    showTree(sfx->tree, 0);
+  #if 1
+    addString(&sfx, string3, -3);
+    printf("////////////////////////////////////////////////////////////////////////////////////////////7\n");
+    showTree(sfx->tree, 0);
+  #endif
+
+    findCommonSubstrings(sfx, 2, 2, 10);
+
+    tearDownWrapper(sfx);
+
+    free(string1);
+    free(string2);
+    free(string3);
 
 
 
-	//functiontests();
-	//return 0;
+    return 0;
+
+
 
 
 
@@ -1420,11 +1330,28 @@ int main(int argc, const char** argv)
 
     PE=0;		//do we have PE data?
 
+
+
+	cutoffperc=90;
+	startlen=10;
+	startcutoff=80;
+
+
+
+
+
+	//functiontests();
+	//return 9;
+
+
+
+
     char * fn1="/home/thieme/eclipse-workspace/SandRA/test2.fastq";
     char * fn2="/home/thieme/eclipse-workspace/SandRA/test2.fastq";
     char * outfn1="/home/thieme/eclipse-workspace/SandRA/test2.out1.fastq";
     char * outfn2=NULL;
-    char* adptfle=NULL; //"/home/thieme/eclipse-workspace/SandRA/adapters.fasta";
+    //char* adptfle=NULL;
+    char* adptfle="/home/thieme/eclipse-workspace/SandRA/adapters.fasta";
 
 
     //parse options
@@ -1499,6 +1426,16 @@ int main(int argc, const char** argv)
 
 
 
+    printf("okay!\n");
+    blast_adapters(useradapters);
+    eval_adapters(useradapters);
+    printf("done!\n");
+
+
+    return 9;
+
+
+
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // get random entries
@@ -1535,7 +1472,7 @@ int main(int argc, const char** argv)
 	blast_adapters(detectedadapters);
 
 
-	//todo merge adapter listes
+	//todo merge adapter lists
 	//detectedadapters + useradapters
 	int i=0;
 	while(NULL!=useradapters[i])
