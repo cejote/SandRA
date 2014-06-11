@@ -183,102 +183,9 @@ int file_exists(const char * filename)
 
 
 
-pedata** get_random_entry(FILE *fp, unsigned int N) //, char** seqlist)
-{
-	/*
-	 *
-	 * open file and get N-many random entries
-	 *
-	 * working version
-	 *
-	 */
 
 
-    long int file_length;
-
-    fseek(fp, 0, SEEK_END);
-    if(fseek(fp, 0, SEEK_END))
-    {
-        puts("Error while seeking to end of file");
-        return NULL;
-    }
-    file_length = ftell(fp);
-
-    printf("file len: %li\n", file_length);
-
-
-    srand(time(NULL));
-
-
-    if (file_length<200000*10*200*3)
-    {
-    	//200000 reads * 10 to have some choices * 200 linelen * 3 headerstring, readstring, and qualstring
-    	//TODO parameter
-    	fprintf(stderr, "Too few entries to perform an automated primer detection. Sorry, try again with more data or trim to known adapters, only (parameter -a).");
-    }
-
-
-	pedata** struclist = (pedata**)malloc(sizeof(pedata*) * N);
-	char currline[MAXREADLEN];
-
-
-    //TODO: if no +-@-combination is present we'll get stuck here -set limit!
-	int breakout = 1000;
-
-    int x;
-    for (x = 0; x < N; ++x)
-    {
-        //TODO: oh!
-        unsigned long seekpos =(rand() % (file_length - 1000)); //don't go beyond end of file - ensure >5 maxlen lines
-        //printf("%d\t%lu\n", x,  seekpos);
-        fseek(fp, seekpos, SEEK_SET);
-        while (1)
-        {
-
-        	if (NULL == fgets(currline, sizeof(currline), fp)){break;}
-            else{
-                //printf("line1 %s\n", line1);
-                if ('+'==currline[0] && strlen(currline)==2)
-                {
-                    fgets(currline, MAXREADLEN-1, fp); //skip
-                    fgets(currline, MAXREADLEN-1, fp); //first line with ^@ID
-
-                    if ('@'==currline[0])
-                    {
-                		pedata *data1=(pedata*)malloc(sizeof(pedata));
-
-                		strcpy(data1->readID1, currline);
-                		if (NULL == fgets(data1->read1, MAXREADLEN-1, fp)){break;}
-                		if (NULL == fgets(data1->phred1, MAXREADLEN-1, fp)){break;} // skip this line
-                		if (NULL == fgets(data1->phred1, MAXREADLEN-1, fp)){break;}
-
-                		if ( valid_characters(data1->read1))
-                		{
-                    		remove_newline(data1->readID1);
-                    		remove_newline(data1->read1);
-                    		remove_newline(data1->phred1);
-
-                    		struclist[x]=data1;
-                            break;
-                		}
-                		else
-                		{
-                			free(data1);
-                		}
-
-
-                    }
-                }
-            }
-        }
-    }
-
-    return struclist;
-}
-
-
-
-pedata* init_pe_data()
+pedata* create_pe_data()
 {
 	/*
 	 * init new pedata struct
@@ -330,7 +237,7 @@ pedata** get_next_reads_to_process(unsigned int N)
 	for  (i=0; i<N; i++)
 	{
 
-		data1=init_pe_data();
+		data1=create_pe_data();
 
 		if (NULL == fgets(tmpline, MAXREADLEN-1, infpR1)){break;}
 		remove_newline(tmpline);
@@ -743,32 +650,125 @@ void trim_adapters(char** read, char** phred)
 
 
 
-char** detect_adapters(pedata** randomreads)
+char** detect_adapters(FILE *fp)
 {
 	/*
-	 *
+	 * find potential adapter sequences using suffix tree-bases search
+     * open read file and get N-many random entries
 	 *
 	 *
 	 */
+	srand(time(NULL));
 
 
-
-	int i=0;
-	while(NULL!=randomreads[i])
-	{
-		//trimming/cropping()
-		//polyA_trim_read()
-
-		printf(">adapter_%d\n%s\n", i, randomreads[i]->read1);
-		//todo: tree.
-		++i;
-	}
-
+	int N=100; //number of random entries to fetch
 
 	//todo MAXADAPTERNUM - get proper length
-	char** adapters = (char**)calloc(MAXADAPTERNUM, sizeof(char*));
-	return adapters;
+	char** adapters = (char**)malloc(sizeof(char*) * MAXADAPTERNUM);
 
+    int rndm=0;
+
+	long int file_length;
+
+	if (rndm) // go to random pos, if required
+	{
+
+		fseek(fp, 0, SEEK_END);
+		if(fseek(fp, 0, SEEK_END))
+		{
+			puts("Error while seeking to end of file");
+			return NULL;
+		}
+		file_length = ftell(fp);
+		fprintf (stderr, "file len: %li\n", file_length);
+		if (file_length<200000*10*200*3)
+		{
+			//200000 reads * 10 to have some choices * 200 linelen * 3 headerstring, readstring, and qualstring
+			//TODO parameter
+			fprintf(stderr, "Too few entries to perform an automated primer detection. Sorry, try again with more data or trim to known adapters, only (parameter -a).");
+			return NULL;
+		}
+	}
+
+    SFXTreeWrapper * sfx = initWrapper();
+    //pedata* currread;
+    //pedata** struclist = (pedata**)malloc(sizeof(pedata*) * N);
+
+	char currline[MAXREADLEN];
+
+    int x;
+    for (x = 0; x < N; ++x)
+	{
+    	if (rndm) // go to random pos, if required
+    	{
+    		//TODO untested - might get @ from qual string?? - tested later by "+"-test
+    		unsigned long seekpos =(rand() % (file_length - 1000)); //don't go beyond end of file - ensure >5 maxlen lines
+    		fseek(fp, seekpos, SEEK_SET);
+    		fgets(currline, MAXREADLEN-1, fp); //skip incomplete line
+    	}
+
+		//continue until @
+    	currline[0]=-1;
+    	while ('@'!=currline[0])
+		{
+			if (NULL == fgets(currline, sizeof(currline), fp)){continue;}
+			printf("looping\n");
+		}
+
+		printf("header > %d %s\n", x, currline);
+
+		pedata *data1=create_pe_data();//(pedata*)malloc(sizeof(pedata));
+
+		strcpy(data1->readID1, currline);
+
+		if (NULL == fgets(data1->read1, MAXREADLEN-1, fp)){continue;}
+
+		if (NULL == fgets(data1->phred1, MAXREADLEN-1, fp)){continue;} // skip this line
+		if (data1->phred1[0]!='+')
+		{continue;}
+
+		if (NULL == fgets(data1->phred1, MAXREADLEN-1, fp)){continue;}
+
+		printf("------\n");
+
+		remove_newline(data1->read1);
+		if ( valid_characters(data1->read1))
+		{
+			remove_newline(data1->readID1);
+			remove_newline(data1->phred1);
+
+			strupr(&data1->read1);
+			//todo: replace u,t
+
+
+			printf("id %s\n", data1->readID1);
+			printf("rd %s\n", data1->read1);
+			printf("ph %s\n", data1->phred1);
+
+
+			printf(">1 %s\n", data1->read1);
+
+
+			//trimming/cropping()
+			//polyA_trim_read()
+
+
+			addString(&sfx, data1->read1, -(x+1));
+
+		}
+
+
+	}
+
+    //showTree(sfx->tree, 0);
+
+    findCommonSubstrings(sfx, 10, 5, 70);
+
+
+    tearDownWrapper(sfx);
+
+    fprintf(stderr, "done2\n");
+    return adapters;
 }
 
 
@@ -1183,6 +1183,44 @@ void test_quality_strings()
 
 }
 
+
+int treetests()
+{
+    //int ** encodedStringList = malloc(sizeof(int*) * 10);
+    char * string1 = malloc(10 * sizeof(char));
+    char * string2 = malloc(10 * sizeof(char));
+    char * string3 = malloc(10 * sizeof(char));
+
+    SFXTreeWrapper * sfx = initWrapper();
+
+
+    strncpy(string1, "TACCCAATG\0", 10);
+    strncpy(string2, "ATACCGAAT\0", 10);
+    strncpy(string3, "CGAATAATC\0", 10);
+
+
+    addString(&sfx, string1, -1);
+    printf("////////////////////////////////////////////////////////////////////////////////////////////7\n");
+    showTree(sfx->tree, 0);
+    addString(&sfx, string2, -2);
+    printf("////////////////////////////////////////////////////////////////////////////////////////////7\n");
+    showTree(sfx->tree, 0);
+  #if 1
+    addString(&sfx, string3, -3);
+    printf("////////////////////////////////////////////////////////////////////////////////////////////7\n");
+    showTree(sfx->tree, 0);
+  #endif
+
+    findCommonSubstrings(sfx, 2, 2, 10);
+
+    tearDownWrapper(sfx);
+
+    free(string1);
+    free(string2);
+    free(string3);
+}
+
+
 int functiontests()
 {
 
@@ -1241,9 +1279,16 @@ int main(int argc, const char** argv)
 {
     srand(time(NULL));
 
-    /*
 
-	char* p = "chsahkjsfdlsg";
+    /*
+    functiontests();
+
+    return 0;
+
+
+
+    char * p= malloc(40 * sizeof(char));
+	sprintf(p, "chsahk2jsf3dlsg");
 
     printf("%s\n", p);
     strupr(&p);
@@ -1251,48 +1296,10 @@ int main(int argc, const char** argv)
 
 
     return 0;
-     */
-
-
-    //int ** encodedStringList = malloc(sizeof(int*) * 10);
-    char * string1 = malloc(10 * sizeof(char));
-    char * string2 = malloc(10 * sizeof(char));
-    char * string3 = malloc(10 * sizeof(char));
-
-    SFXTreeWrapper * sfx = initWrapper();
-
-
-    strncpy(string1, "TACCCAATG\0", 10);
-    strncpy(string2, "ATACCGAAT\0", 10);
-    strncpy(string3, "CGAATAATC\0", 10);
-
-
-    addString(&sfx, string1, -1);
-    printf("////////////////////////////////////////////////////////////////////////////////////////////7\n");
-    showTree(sfx->tree, 0);
-    addString(&sfx, string2, -2);
-    printf("////////////////////////////////////////////////////////////////////////////////////////////7\n");
-    showTree(sfx->tree, 0);
-  #if 1
-    addString(&sfx, string3, -3);
-    printf("////////////////////////////////////////////////////////////////////////////////////////////7\n");
-    showTree(sfx->tree, 0);
-  #endif
-
-    findCommonSubstrings(sfx, 2, 2, 10);
-
-    tearDownWrapper(sfx);
-
-    free(string1);
-    free(string2);
-    free(string3);
 
 
 
-    return 0;
-
-
-
+    */
 
 
 
@@ -1346,12 +1353,12 @@ int main(int argc, const char** argv)
 
 
 
-    char * fn1="/home/thieme/eclipse-workspace/SandRA/test2.fastq";
-    char * fn2="/home/thieme/eclipse-workspace/SandRA/test2.fastq";
+    char * fn1="/home/thieme/eclipse-workspace/SandRA/test.fastq";
+    char * fn2="/home/thieme/eclipse-workspace/SandRA/test.fastq";
     char * outfn1="/home/thieme/eclipse-workspace/SandRA/test2.out1.fastq";
     char * outfn2=NULL;
-    //char* adptfle=NULL;
-    char* adptfle="/home/thieme/eclipse-workspace/SandRA/adapters.fasta";
+    char* adptfle=NULL;
+    //char* adptfle="/home/thieme/eclipse-workspace/SandRA/adapters.fasta";
 
 
     //parse options
@@ -1427,12 +1434,10 @@ int main(int argc, const char** argv)
 
 
     printf("okay!\n");
-    blast_adapters(useradapters);
-    eval_adapters(useradapters);
-    printf("done!\n");
+    //blast_adapters(useradapters);
+    //eval_adapters(useradapters);
+    //printf("done!\n");
 
-
-    return 9;
 
 
 
@@ -1440,10 +1445,11 @@ int main(int argc, const char** argv)
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // get random entries
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    if (0)
+    if (1)
     {
     FILE *fnrnd = fopen(fn1, "r");
 
+    /*
     pedata ** randomentries=NULL;
     randomentries = get_random_entry(fnrnd, 5);
 
@@ -1458,14 +1464,16 @@ int main(int argc, const char** argv)
         printf(": %s", randomentries[a2]->phred1);
     }
 
+     */
+
+    char** detectedadapters;
+    detectedadapters=detect_adapters(fnrnd);
     fclose(fnrnd);
 
 
+    printf("done\n");
+    return -5;
 
-
-    //todo: to be implemented
-    char** detectedadapters;
-    detectedadapters=detect_adapters(randomentries);
 
 
 	//test for the blast procedure for auto-detected adapters
@@ -1487,7 +1495,8 @@ int main(int argc, const char** argv)
     }
 
 
-
+    printf("next break point\n");
+    return -5;
 
 
 

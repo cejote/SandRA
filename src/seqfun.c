@@ -137,13 +137,18 @@ int is_valid_character(char c)
 		case 'C': break;
 		case 'G': break;
 		case 'T': break;
+		case 'U': break;
 
 //TODO case sensitive
 		case 'a': break;
 		case 'c': break;
 		case 'g': break;
 		case 't': break;
-		default: return 0;
+		case 'u': break;
+
+		default:
+			//printf("Y %d\n", c);
+			return 0;
 	}
 	return 1;
 }
@@ -167,32 +172,11 @@ int valid_characters(char * line)
 
 void strupr(char **s)
 {
-	//TODO not working
 	int pos;
-
-/*
 	for (pos=0; pos<strlen(*s); pos++)
 	{
-		printf("> %c\n", **s);
-		**s++;
-//		printf("%c\n", toupper((*s)[pos]));
-		//s[pos]=toupper(s[pos]);
+		*(*s + pos) = toupper(*(*s + pos));
 	}
-
-
-
-//	while(**s++=toupper(**s))
-
-*/
-
-	for (pos=0; pos<strlen(*s); pos++)
-	{
-		printf("%d %d\n" , strlen(*s), pos);
-		printf("%c\n", (*s)[pos]);
-		printf("%c\n", toupper((*s)[pos]));
-		//(*s)[pos]=toupper((*s)[pos]);
-	}
-
     return;
 }
 

@@ -6,7 +6,17 @@
 
 
 
-void showNode(SFXTree * node, int level);
+
+void tearDownStack(SFXStack * stack)
+{
+  int i;
+  for (i = 0; i < stack->maxSize; ++i) {
+    if (NULL != (stack->nodes + i)) {
+      free(*(stack->nodes + i));
+    }
+  }
+  free(stack);
+}
 
 void initStack(SFXStack *stack, int maxSize)
 {
@@ -197,7 +207,7 @@ void tearDown(SFXTree * node)
 void tearDownWrapper(SFXTreeWrapper * sfx)
 {
   int i;
-  for (i = 1; i < sfx->nStrings; ++i) {
+  for (i = 1; i < sfx->maxStrings; ++i) {
     free(*(sfx->encodedStrings + i));
   }
   free(sfx->encodedStrings);
@@ -470,6 +480,8 @@ void insertStringNaive(SFXTree ** st, int stringID, int slen, int ** encList, in
 
 void findCommonSubstrings(SFXTreeWrapper * sfx, int minlen, int k, int estReadLen)
 {
+
+
   int i;
   SFXStack * stack = malloc(sizeof(SFXStack));
   initStack(stack, estReadLen);
@@ -483,18 +495,19 @@ void findCommonSubstrings(SFXTreeWrapper * sfx, int minlen, int k, int estReadLe
     int matches_k = (node->nVisitingStrings >= k);
 
     if (matches_k && (node->strDepth >= minlen)) {
-      printf("(k=%i >= %i)-common substring:\n", node->nVisitingStrings, k);
+      fprintf(stderr, "(k=%i >= %i)-common substring:\n", node->nVisitingStrings, k);
       char * ckSubstring = malloc(sizeof(char) * (node->strDepth + 1));
       char * cp = ckSubstring;
 
       for (i = node->incLblEnd - node->strDepth + 1; i <= node->incLblEnd; ++i, ++cp) {
+        // fprintf(stderr, ">>i=%i\n", i);
         if (sfx->encodedStrings[-node->stringID][i] < 0) { break; }
-        printf("%i ", sfx->encodedStrings[-node->stringID][i]);
+        //fprintf(stderr, ">%i ", sfx->encodedStrings[-node->stringID][i]);
         *cp = sfx->encodedStrings[-node->stringID][i];
       }
       printf("\n");
       *cp = 0;
-      printf("=> %s\n", ckSubstring);
+      fprintf(stderr, "=> %s\n", ckSubstring);
      
       free(ckSubstring);
     }
@@ -517,11 +530,11 @@ void findCommonSubstrings(SFXTreeWrapper * sfx, int minlen, int k, int estReadLe
   
   
   //memset(stack, 0, sizeof(SFXTree) * stack->maxSize);  // if we don't set that space to 0, we might overwrite the stored pointers, no? 
-  free(stack); // still leaking... why?
+  tearDownStack(stack);
+  //free(stack); // still leaking... why?
   return ;
 
 }
-
 
 /*
 int main(int argc, char ** argv) 
